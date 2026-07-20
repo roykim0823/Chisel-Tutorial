@@ -1,0 +1,12 @@
+# sbt / Scala build output
+target/
+project/target/
+project/project/
+
+# Chisel / firtool generated hardware and simulation artifacts
+*.sv
+*.v
+*.fir
+*.anno.json
+generated/
+test_run_dir/

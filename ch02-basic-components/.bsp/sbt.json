@@ -1,0 +1,1 @@
+{"name":"sbt","version":"1.12.11","bspVersion":"2.1.0-M1","languages":["scala"],"argv":["/home/vscode/chipyard/.conda-env/lib/jvm/bin/java","-Xms100m","-Xmx100m","-classpath","/home/vscode/chipyard/.conda-env/share/sbt/bin/sbt-launch.jar","-Dsbt.script=/home/vscode/chipyard/.conda-env/share/sbt/bin/sbt","xsbt.boot.Boot","-bsp"]}

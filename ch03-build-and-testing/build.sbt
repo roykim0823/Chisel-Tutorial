@@ -1,0 +1,22 @@
+// Chapter 3 - Build Process and Testing
+// Self-contained Chisel project for the tutorial.
+//
+// Same pinned versions as the other chapters and the main chisel-book build,
+// so the shared Coursier/Ivy cache is reused and nothing is re-downloaded.
+// Note: chiseltest pulls in the matching ScalaTest, so no separate ScalaTest
+// dependency is needed even though we use a pure-ScalaTest example.
+
+scalaVersion := "2.13.14"
+
+val chiselVersion = "6.5.0"
+
+scalacOptions ++= Seq(
+  "-deprecation",
+  "-feature",
+  "-unchecked",
+  "-language:reflectiveCalls",
+)
+
+addCompilerPlugin("org.chipsalliance" % "chisel-plugin" % chiselVersion cross CrossVersion.full)
+libraryDependencies += "org.chipsalliance" %% "chisel" % chiselVersion
+libraryDependencies += "edu.berkeley.cs" %% "chiseltest" % "6.0.0"

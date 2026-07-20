@@ -1,0 +1,25 @@
+import chisel3._
+import chiseltest._
+import org.scalatest.flatspec.AnyFlatSpec
+
+// Test the tick generator WITH access to its bored-out internal counter.
+class BoringTest extends AnyFlatSpec with ChiselScalatestTester {
+  "Boring" should "expose the internal counter" in {
+    test(new TickGenTestTop()) { dut =>
+      dut.io.tick.expect(false.B)
+      dut.io.counter.expect(0.U)
+
+      dut.clock.step()
+      dut.io.tick.expect(false.B)
+      dut.io.counter.expect(1.U)
+
+      dut.clock.step(8)
+      dut.io.tick.expect(true.B)
+      dut.io.counter.expect(9.U)
+
+      dut.clock.step()
+      dut.io.tick.expect(false.B)
+      dut.io.counter.expect(0.U)
+    }
+  }
+}

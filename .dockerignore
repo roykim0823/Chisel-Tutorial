@@ -1,0 +1,10 @@
+# Keep the build context small: never copy build output into the image.
+**/target/
+**/project/target/
+**/project/project/
+**/test_run_dir/
+**/generated/
+**/*.sv
+**/*.fir
+**/*.anno.json
+.git/
