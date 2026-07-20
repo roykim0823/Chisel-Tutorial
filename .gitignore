@@ -10,3 +10,4 @@ project/project/
 *.anno.json
 generated/
 test_run_dir/
+.bsp
