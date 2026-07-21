@@ -11,3 +11,5 @@ project/project/
 generated/
 test_run_dir/
 .bsp
+.vscode
+.metals

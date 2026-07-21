@@ -231,10 +231,10 @@ every path (otherwise Chisel would infer a latch and reject it).
 ## 4.4 Bulk connections with `<>`
 
 Wiring bundles field-by-field is tedious. The **`<>`** operator connects two
-bundles by matching leaf-field **names** and directions in both directions
-(unmatched names are simply left unconnected). Three pipeline stages —
-`Fetch`, `Decode`, `Execute` — connect with just two `<>` operators, plus one
-to the parent port:
+bundles by matching leaf-field **names** and directions. In the book (an older
+Chisel), it connected the names present in both bundles and simply left any
+unmatched names unconnected. Three pipeline stages — `Fetch`, `Decode`,
+`Execute` — connect with just two `<>` operators, plus one to the parent port:
 
 `src/main/scala/components.scala`
 ```scala
@@ -247,8 +247,68 @@ decode.io <> execute.io   // aluOp, regA, regB
 io <> execute.io          // result (Execute out -> parent out)
 ```
 
-The full `Fetch`/`Decode`/`Execute`/`Processor` definitions are in
+The `Fetch`/`Decode`/`Execute`/`Processor` definitions are in
 `components.scala`.
+
+### Chisel 6 changed `<>` — this `Processor` no longer elaborates
+
+This is the one place the book diverges from Chisel 6. **Chisel 6's `<>`
+requires both bundles to carry the *same* leaf fields;** it no longer silently
+ignores unmatched names. Here `fetch.io` has `{instr, pc}` while `decode.io`
+also has `{aluOp, regA, regB}`, so `fetch.io <> decode.io` now fails at
+elaboration:
+
+```
+Connection between left (Fetch.io) and source (Decode.io) failed
+@.regB: Left Record missing field (regB).
+```
+
+(The book's `Processor` is kept in `components.scala` for reference, alongside
+the other illustrative-only modules; nothing elaborates it, so the project
+still compiles.)
+
+The idiomatic fix is to **group the signals that cross each stage boundary into
+their own bundle**, so every `<>` connects two bundles of *identical* shape. A
+reworked `Processor6` does exactly that, with trivial stage logic added so
+there is something to simulate and test:
+
+`src/main/scala/components.scala`
+```scala
+// signals crossing each stage boundary, grouped into a bundle
+class FetchDecode extends Bundle {
+  val instr = UInt(32.W)
+  val pc = UInt(32.W)
+}
+class DecodeExecute extends Bundle {
+  val aluOp = UInt(5.W)
+  val regA = UInt(32.W)
+  val regB = UInt(32.W)
+}
+
+class Processor6 extends Module {
+  val io = IO(new Bundle {
+    val result = Output(UInt(32.W))
+  })
+
+  val fetch = Module(new Fetch6())
+  val decode = Module(new Decode6())
+  val execute = Module(new Execute6())
+
+  decode.io.in <> fetch.io.out    // FetchDecode   (Fetch out -> Decode in)
+  execute.io.in <> decode.io.out  // DecodeExecute (Decode out -> Execute in)
+  io.result := execute.io.result  // single field: a plain := is clearest
+}
+```
+
+Each stage exposes its boundary bundle as one `Input`/`Output` port (see
+`Fetch6`/`Decode6`/`Execute6` in `components.scala`), so `decode.io.in` and
+`fetch.io.out` are both a `FetchDecode` and connect cleanly. The last hop is a
+single scalar into the parent port, so a plain `:=` reads better than `<>`
+(the parent `io` and `execute.io` don't have matching field sets either).
+
+With `Fetch6` emitting `instr = 42`, `pc = 100`, and `Execute6` adding the two
+forwarded values, the whole pipeline reduces to `result = 142` — which is what
+the tests below check.
 
 ---
 
@@ -268,10 +328,14 @@ Expected output:
 [info] - should count 0..9 and wrap
 [info] Alu
 [info] - should add, subtract, or, and
-[info] Run completed in 960 milliseconds.
-[info] Total number of tests run: 2
+[info] Processor6
+[info] - should carry values through the <> bulk connections
+[info] Processor6
+[info] - should hold the result steady across cycles (no state)
+[info] Run completed in 1 second, 160 milliseconds.
+[info] Total number of tests run: 4
 [info] Suites: completed 1, aborted 0
-[info] Tests: succeeded 2, failed 0, canceled 0, ignored 0, pending 0
+[info] Tests: succeeded 4, failed 0, canceled 0, ignored 0, pending 0
 [info] All tests passed.
 ```
 
@@ -281,9 +345,23 @@ Expected output:
 $ sbt "runMain Generate"
 ```
 
-Writes `Count10.sv` and `Alu.sv`. In `Count10.sv` the module has an
-`output [7:0] io_dout` plus the implicit `clock`/`reset`; in `Alu.sv` the
+Writes `Count10.sv`, `Alu.sv`, and `Processor6.sv`. In `Count10.sv` the module
+has an `output [7:0] io_dout` plus the implicit `clock`/`reset`; in `Alu.sv` the
 `switch` becomes a multiplexer indexed by `io_fn` (`assign io_y = _GEN[io_fn]`).
+`Processor6.sv` shows the payoff of a purely-combinational, constant-fed
+pipeline: firtool flattens the three stages and folds the arithmetic away
+entirely, leaving just the top-level port:
+
+```systemverilog
+module Processor6(
+  input         clock,
+                reset,
+  output [31:0] io_result
+);
+
+  assign io_result = 32'h8E;   // 142 = 42 + 100
+endmodule
+```
 
 ---
 
@@ -294,7 +372,9 @@ Writes `Count10.sv` and `Alu.sv`. In `Count10.sv` the module has an
 - Instantiate a submodule with `Module(new X())`, bind it to a `val`, and reach
   its ports via `.io`.
 - Build hierarchy by connecting submodule ports with `:=`, or connect whole
-  bundles by name with `<>`.
+  bundles by name with `<>`. In Chisel 6 `<>` requires both bundles to have the
+  *same* leaf fields, so group each stage boundary's signals into a shared
+  bundle (see `Processor6`) rather than relying on the book's lenient behavior.
 - `switch`/`is` (from `chisel3.util._`) expresses multi-way selection; give the
   output a default first.
 

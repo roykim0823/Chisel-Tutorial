@@ -202,3 +202,77 @@ class Processor extends Module {
   decode.io <> execute.io
   io <> execute.io
 }
+
+// ---------------------------------------------------------------------------
+// The same pipeline, working under Chisel 6.
+//
+// The Processor above is the book's original. Its `<>` lines no longer
+// elaborate under Chisel 6: the operator now requires both bundles to carry
+// the *same* leaf fields, whereas older Chisel silently left unmatched names
+// unconnected. `fetch.io` has {instr, pc} but `decode.io` also has
+// {aluOp, regA, regB}, so `fetch.io <> decode.io` fails with
+// "Left Record missing field (regB)".
+//
+// The idiomatic fix is to group the signals that cross each stage boundary
+// into their own bundle, so every `<>` connects two bundles of identical
+// shape. Trivial stage logic is added so there is something to simulate.
+// ---------------------------------------------------------------------------
+
+// Signals passed from Fetch to Decode.
+class FetchDecode extends Bundle {
+  val instr = UInt(32.W)
+  val pc = UInt(32.W)
+}
+
+// Signals passed from Decode to Execute.
+class DecodeExecute extends Bundle {
+  val aluOp = UInt(5.W)
+  val regA = UInt(32.W)
+  val regB = UInt(32.W)
+}
+
+class Fetch6 extends Module {
+  val io = IO(new Bundle {
+    val out = Output(new FetchDecode)
+  })
+  // A real fetch reads instruction memory; here we just emit constants.
+  io.out.instr := 42.U
+  io.out.pc := 100.U
+}
+
+class Decode6 extends Module {
+  val io = IO(new Bundle {
+    val in = Input(new FetchDecode)
+    val out = Output(new DecodeExecute)
+  })
+  // A real decode cracks the instruction; here we forward the fetched values.
+  io.out.aluOp := 0.U
+  io.out.regA := io.in.instr
+  io.out.regB := io.in.pc
+}
+
+class Execute6 extends Module {
+  val io = IO(new Bundle {
+    val in = Input(new DecodeExecute)
+    val result = Output(UInt(32.W))
+  })
+  // A real execute selects an operation with aluOp; here we simply add.
+  io.result := io.in.regA + io.in.regB
+}
+
+class Processor6 extends Module {
+  val io = IO(new Bundle {
+    val result = Output(UInt(32.W))
+  })
+
+  val fetch = Module(new Fetch6())
+  val decode = Module(new Decode6())
+  val execute = Module(new Execute6())
+
+  // Each `<>` now connects two bundles of identical shape.
+  decode.io.in <> fetch.io.out    // FetchDecode   (Fetch out -> Decode in)
+  execute.io.in <> decode.io.out  // DecodeExecute (Decode out -> Execute in)
+  // The parent port is a single field, not the whole `execute.io` bundle
+  // (which also has `in`), so a plain := is clearest here.
+  io.result := execute.io.result
+}

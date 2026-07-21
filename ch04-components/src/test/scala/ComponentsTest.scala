@@ -24,4 +24,23 @@ class ComponentsTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.fn.poke(3.U); dut.io.y.expect((12 & 10).U)
     }
   }
+
+  // The Processor6 pipeline is purely combinational: Fetch6 emits instr=42,
+  // pc=100; Decode6 forwards them as regA/regB; Execute6 adds them. Seeing the
+  // top-level result equal 42 + 100 = 142 proves the values flow end-to-end
+  // through the two `<>` bulk connections.
+  "Processor6" should "carry values through the <> bulk connections" in {
+    test(new Processor6) { dut =>
+      dut.io.result.expect(142.U) // 42 (instr) + 100 (pc)
+    }
+  }
+
+  "Processor6" should "hold the result steady across cycles (no state)" in {
+    test(new Processor6) { dut =>
+      for (_ <- 0 until 3) {
+        dut.io.result.expect(142.U)
+        dut.clock.step()
+      }
+    }
+  }
 }
