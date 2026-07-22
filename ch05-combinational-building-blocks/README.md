@@ -41,10 +41,18 @@ The simplest form is a **named Boolean expression** — assign it to a Scala
 ```scala
 val e = (a & b) | c   // a named Boolean expression
 val f = ~e            // reused in another expression
+// e = c & b          // a Scala compiler error
+// e := c & b         // a Runtime error in Chisel
 ```
 
-`e` is fixed: reassigning with Scala `=` gives *reassignment to val*, and using
-Chisel `:=` gives a runtime *Cannot reassign to read-only*.
+`e` is fixed: reassigning with Scala `=` gives a Scala compiler error: *reassignment to val*, and using
+Chisel `:=` gives a runtime error: *Cannot reassign to read-only*.
+
+```scala
+e = c & b          // a Scala compiler error!
+e := c & b         // a Runtime error in Chisel!
+```
+*illustrative*
 
 For conditional logic, declare a `Wire`, give it a default, and update it with
 **`when`**. This describes a **multiplexer** (select `cond` between 0 and 3) —
@@ -93,6 +101,12 @@ when (cond) {
 ***Figure 5.1** — A `when`/`.elsewhen`/`.otherwise` chain becomes a chain of
 2:1 multiplexers, with priority toward the first condition.*
 
+The chain introduces a **priority**: when `cond` is true, the later conditions
+are not evaluated. Note the leading `.` in `.elsewhen` — it is needed to *chain
+methods* in Scala. Those `.elsewhen` branches can be arbitrarily long. However,
+if the whole chain of conditions depends on a *single* signal, it is cleaner to
+use the **`switch`** statement (introduced next, with the decoder).
+
 Finally, **`WireDefault`** folds the default into the declaration:
 
 `src/main/scala/Combinational.scala`
@@ -137,12 +151,24 @@ Even though every input is listed, Chisel still requires a default (`result :=
 
 `src/main/scala/EncDec.scala`
 ```scala
+import chisel3.util._
+...
+
 result := 0.U
 switch(sel) {
   is (0.U) { result := 1.U }
   is (1.U) { result := 2.U }
   is (2.U) { result := 4.U }
   is (3.U) { result := 8.U }
+}
+
+// a clearer representation of an encode circuit
+result := 0.U
+switch(sel) {
+  is ("b00".U) { result := "b0001".U }
+  is ("b01".U) { result := "b0010".U }
+  is ("b10".U) { result := "b0100".U }
+  is ("b11".U) { result := "b1000".U }
 }
 ```
 
@@ -154,10 +180,22 @@ one-liner that also scales to any width:
 result := 1.U << sel
 ```
 
+The initial `result := 0.U` assignment "will never be active and is therefore
+optimized away by the synthesis tool." Its only job is to avoid an *incomplete
+assignment*, which in VHDL/Verilog would infer an unintended latch — Chisel
+refuses to compile a `Wire` that isn't driven on every path.
+
 > **Last-connect note:** `EncDec.scala` shows all three formulations
 > (UInt switch, binary-literal switch, and the shift) one after another. Chisel
 > keeps the **last** assignment, so the shift is what actually drives `decout`;
 > the switches are there to compare styles.
+
+**Where decoders are used.** A decoder is a building block for a multiplexer:
+its one-hot output feeds AND gates that *enable* one data input. (In Chisel you
+rarely wire that by hand — a `Mux` is in the core library.) Decoders also do
+**address decoding**: some bits of a microprocessor's address bus are decoded to
+produce the select signals for the different memories and IO devices on the bus
+(see Chapter 12, Interconnect).
 
 ---
 
@@ -191,10 +229,28 @@ switch (a) {
 }
 ```
 
-Unlike the decoder, there's no neat one-liner. For a *wide* encoder we write a
-small **generator** with a Scala `for` loop (this loop runs at build time — it
-is *not* a hardware counter). Each `Vec` element is the index `i` when bit `i`
-of the input is set, else 0; OR-reducing them gives the result:
+Unlike the decoder, there's no neat one-liner, and we're not aware of an
+elegant single expression for the encoder. To describe a *wide* encoder we write
+a small **hardware generator**, which needs the Scala loop construct. The
+simplest form counts a loop variable over a range:
+
+```scala
+// Loops i from 0 to 9
+for (i <- 0 until 10) {
+  // use i to index into a Wire or Vec
+}
+```
+*illustrative*
+
+The loop variable `i` can be used to index individual bits of a `Wire` or
+`Reg`, or an element of a `Vec`. This is the simplest form of a hardware
+generator; Chapter 10 covers generators in depth. **Important:** the loop runs
+at *circuit generation time* (it is unrolled by Scala) — it is **not** a
+hardware counter.
+
+For the encoder generator we use a `Vec`, where each element represents one
+column of the encoder table. The following builds a 16-bit encoder with a 4-bit
+output:
 
 `src/main/scala/EncDec.scala`
 ```scala
@@ -206,13 +262,29 @@ for (i <- 1 until 16) {
 val encOut = v(15)
 ```
 
+Reading it element by element: `v(0)` is the default case (`0`), which is also
+the output value when the least-significant bit of `hotIn` is set. Elements
+`v(1)` through `v(15)` each feed a multiplexer — if bit `i` of `hotIn` is set,
+that element is the index `i.U`, otherwise `0`. Because every element is `0`
+except the one whose input bit is set, we can merge them all with a single OR.
+The loop ORs each element with the previous one (`... | v(i - 1)`), so `v(15)`
+carries the combined result. Combining many values with one function this way is
+called a **reduce** — here, an **OR reduction**. (This assumes a one-hot input,
+just like the switch-based encoder.)
+
 ---
 
 ## 5.4 Arbiter
 
-An **arbiter** grants a shared resource to one of several requesters. This is a
-*priority* arbiter: lower bit index = higher priority (e.g. request `0101` →
-grant `0001`).
+An **arbiter** arbitrates requests from several clients to a shared resource —
+for example, several processor cores sharing a single serial port (UART). This
+is a *priority* arbiter: the lower the bit number, the higher the priority, so
+request `0101` → grant `0001`.
+
+To build a **fair** arbiter — one that doesn't always favour the low-index
+clients — we would have to add state to remember the last arbitration. That
+fair (round-robin) arbiter is presented later in the book; the version here is
+purely combinational.
 
 <p align="center">
   <img src="figures/arbiter-box.png" alt="A 4-bit arbiter symbol" width="300">
@@ -251,11 +323,14 @@ grant(2) := request(2) && notGranted(1)
 ```scala
 val grant = WireDefault("b0000".U(3.W))
 switch (request) {
-  is ("b000".U) { grant := "b000".U }
-  is ("b001".U) { grant := "b001".U }
-  is ("b010".U) { grant := "b010".U }
-  is ("b011".U) { grant := "b001".U }
-  // ... 100, 101, 110, 111
+    is ("b000".U) { grant := "b000".U }
+    is ("b001".U) { grant := "b001".U }
+    is ("b010".U) { grant := "b010".U }
+    is ("b011".U) { grant := "b001".U }
+    is ("b100".U) { grant := "b100".U }
+    is ("b101".U) { grant := "b001".U }
+    is ("b110".U) { grant := "b010".U }
+    is ("b111".U) { grant := "b001".U }
 }
 ```
 
@@ -274,6 +349,11 @@ for (i <- 1 until n) {
   notGranted(i) := !grant(i) && notGranted(i - 1)
 }
 ```
+
+This is exactly the unrolled hand-written version, generated for `n` requests.
+The one small difference: the loop also generates a `notGranted` wire for the
+*last* request (`n - 1`). Nothing reads it, so the synthesis tool simply
+optimizes it away.
 
 ---
 

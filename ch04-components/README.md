@@ -150,6 +150,10 @@ class CompB extends Module {
 }
 ```
 
+Because these examples carry no function, we gave them **generic port names**
+(`a`, `b`, `x`, `in1`, …). In a real design, use **descriptive** port names such
+as `data`, `valid`, or `ready`.
+
 `CompC` creates A and B with `Module(new ...)` and connects them:
 
 `src/main/scala/components.scala`
@@ -172,8 +176,48 @@ class CompC extends Module {
 }
 ```
 
-`CompD` and the `TopLevel` that ties everything together are also in
-`components.scala` (`class CompD`, `class TopLevel`).
+`CompD` is the simplest component — one input, one output:
+
+`src/main/scala/components.scala`
+```scala
+class CompD extends Module {
+  val io = IO(new Bundle {
+    val in = Input(UInt(8.W))
+    val out = Output(UInt(8.W))
+  })
+
+  // function of D
+}
+```
+
+Finally, `TopLevel` is itself assembled from `CompC` and `CompD`, wiring `CompC`'s
+`outY` into `CompD`'s `in`:
+
+`src/main/scala/components.scala`
+```scala
+class TopLevel extends Module {
+  val io = IO(new Bundle {
+    val inA = Input(UInt(8.W))
+    val inB = Input(UInt(8.W))
+    val inC = Input(UInt(8.W))
+    val outM = Output(UInt(8.W))
+    val outN = Output(UInt(8.W))
+  })
+
+  // create C and D
+  val c = Module(new CompC())
+  val d = Module(new CompD())
+
+  // connect C
+  c.io.inA := io.inA
+  c.io.inB := io.inB
+  c.io.inC := io.inC
+  io.outM := c.io.outX
+  // connect D
+  d.io.in := c.io.outY
+  io.outN := d.io.out
+}
+```
 
 > **Why these don't generate Verilog:** because `CompA`/`CompB`/`CompD` have no
 > logic, their outputs are never driven. Chisel refuses to emit an
@@ -181,16 +225,28 @@ class CompC extends Module {
 > elaborated. That's expected here — they exist only to show wiring. `Count10`
 > and `Alu` below *are* complete and do generate.
 
-> **Rule of thumb (from the book):** a component's interface is verbose, so make
-> the component's *function* at least as long as its interface — otherwise the
-> boilerplate dominates.
+**How big should a component be?** Good component design mirrors good
+function/method design in software. The two extremes are **tiny** components
+(an adder) and **huge** ones (a whole microprocessor). Beginners tend to start
+with tiny components — partly because digital-design books (this one included)
+use small examples to fit on a page and avoid distracting detail. But a
+component's interface (types, names, directions, `IO` construction) is verbose:
+
+> **Rule of thumb (from the book):** make the component's *function* at least as
+> long as its interface — otherwise the boilerplate dominates.
+
+For genuinely tiny components, such as a counter, Chisel offers a more
+lightweight alternative — **functions that return hardware** — covered in
+Chapter 10.
 
 ---
 
 ## 4.3 An Arithmetic Logic Unit (ALU)
 
 An ALU computes one of several functions of two inputs, selected by a function
-input `fn`. It is usually combinational (no state).
+input `fn`. It is usually combinational (no state). An ALU might also carry
+**extra outputs** signalling properties of the result, such as *zero* or the
+*sign* — this one keeps just the result `y`.
 
 <p align="center">
   <img src="figures/alu.png" alt="An arithmetic logic unit" width="240">
@@ -199,8 +255,13 @@ input `fn`. It is usually combinational (no state).
 ***Figure 4.5** — An ALU: data inputs `a`, `b`, function select `fn`, output `y`.*
 
 This ALU supports add / subtract / or / and, selected by a 2-bit `fn`. It uses
-the **`switch`/`is`** construct (a readable multi-way selection), which needs
-`import chisel3.util._`:
+the **`switch`/`is`** construct (a readable multi-way selection), which needs a
+Chisel utility package:
+
+`src/main/scala/components.scala`
+```scala
+import chisel3.util._
+```
 
 `src/main/scala/components.scala`
 ```scala
@@ -233,8 +294,56 @@ every path (otherwise Chisel would infer a latch and reject it).
 Wiring bundles field-by-field is tedious. The **`<>`** operator connects two
 bundles by matching leaf-field **names** and directions. In the book (an older
 Chisel), it connected the names present in both bundles and simply left any
-unmatched names unconnected. Three pipeline stages — `Fetch`, `Decode`,
-`Execute` — connect with just two `<>` operators, plus one to the parent port:
+unmatched names unconnected.
+
+To see it in action, imagine a pipelined processor. The **fetch** stage has this
+interface:
+
+`src/main/scala/components.scala`
+```scala
+class Fetch extends Module {
+  val io = IO(new Bundle {
+    val instr = Output(UInt(32.W))
+    val pc = Output(UInt(32.W))
+  })
+  // ... Implementation of fetch
+}
+```
+
+The next stage is the **decode** stage (it takes `instr`/`pc` and produces the
+decoded operands):
+
+`src/main/scala/components.scala`
+```scala
+class Decode extends Module {
+  val io = IO(new Bundle {
+    val instr = Input(UInt(32.W))
+    val pc = Input(UInt(32.W))
+    val aluOp = Output(UInt(5.W))
+    val regA = Output(UInt(32.W))
+    val regB = Output(UInt(32.W))
+  })
+  // ... Implementation of decode
+}
+```
+
+The final stage is the **execute** stage:
+
+`src/main/scala/components.scala`
+```scala
+class Execute extends Module {
+  val io = IO(new Bundle {
+    val aluOp = Input(UInt(5.W))
+    val regA = Input(UInt(32.W))
+    val regB = Input(UInt(32.W))
+    val result = Output(UInt(32.W))
+  })
+  // ... Implementation of execute
+}
+```
+
+These three stages connect with just **two `<>` operators**, plus one to the
+parent port (a submodule port can be bulk-connected to the parent module too):
 
 `src/main/scala/components.scala`
 ```scala

@@ -6,6 +6,20 @@ tests readable with helper functions, selecting tests with **tags**, reaching
 **internal signals** with `BoringUtils`, **multithreaded** tests, simulator
 **backends**, and finally **assertions** and **formal verification**.
 
+**Testing vs. verification — a note on terminology.** In software development,
+*testing* means running tests against components, while *verification* is
+usually shorthand for *formal* verification (mathematical proofs or exhaustive
+model checking). Digital design borrows *testing* in the same sense — writing
+test benches that stimulate and check a device under test (DUT) — but the word
+is overloaded: it's also used for the physical test of a manufactured chip on a
+tester, using built-in self-tests. Because of that overlap, the digital-design
+community is slowly shifting toward calling this *verification* instead, and
+reserving *formal verification* for the SMT/model-checking flavor. This book
+sticks with **testing** throughout, for consistency. Either way, verification
+can be **dynamic** (running the design on a simulator — what Chapter 3 and most
+of this chapter do) or **formal** (a model checker or SMT solver proves a
+property for *all* inputs, up to a bound — §13.4).
+
 *Conventions: every file path is relative to
 `tutorial/ch13-debugging-testing-verification/`, and every command is run from
 that folder. This chapter has no figures.*
@@ -39,15 +53,94 @@ signals evolve over time.
 
 ## 13.2 Testing in Chisel
 
-ChiselTest (on ScalaTest) uses `poke`, `peek`, `expect`, and `step` on the DUT's
-ports; `peekInt()`/`peekBoolean()` return Scala values. Run everything with
-`sbt test`, or one suite with `sbt "testOnly Name"`.
+ChiselTest is built on ScalaTest, so `sbt test` runs everything. ScalaTest also
+runs multiple test **classes** in parallel by default (multithreading at the
+class level) — that's separate from the fork/join threading *inside* a single
+test, covered below. A test is a class extending `AnyFlatSpec` with the
+`ChiselScalatestTester` trait; inside it, `poke`, `peek`, `expect`, and `step`
+operate on **Chisel types** (`UInt`/`SInt`/`Bool`). Since test code is Scala,
+`peekInt()` and `peekBoolean()` are also available to convert a peek to a plain
+Scala `BigInt`/`Boolean`. Run everything with `sbt test`, or one suite with
+`sbt "testOnly Name"`.
+
+The simplest possible test just wraps a few pokes/expects in `test(...)`, here
+checking a BCD lookup table:
+
+```scala
+class BcdTableTest extends AnyFlatSpec with ChiselScalatestTester {
+  "BCD table" should "output BCD encoded numbers" in {
+    test(new BcdTable) { dut =>
+      dut.io.address.poke(0.U)
+      dut.io.data.expect("h00".U)
+      dut.io.address.poke(1.U)
+      dut.io.data.expect("h01".U)
+      dut.io.address.poke(13.U)
+      dut.io.data.expect("h13".U)
+      dut.io.address.poke(99.U)
+      dut.io.data.expect("h99".U)
+    }
+  }
+}
+```
+*illustrative — the book's simplest `test(...)` example*
+
+An equivalent `behavior of` / `it should` form reads well once a module has
+several tests:
+
+```scala
+class BcdTableTest extends AnyFlatSpec with ChiselScalatestTester {
+  behavior of "BCD table"
+
+  it should "output BCD encoded numbers" in {
+    test(new BcdTable) { dut => /* ... */ }
+  }
+}
+```
+*illustrative*
+
+**A worked example: the counter device.** A first pass at testing the counter
+device from Chapter 12 pokes and expects every signal by hand — it works, but
+covers only a couple of cases and is already tedious to read.
 
 **Make tests readable with functions.** Raw `poke`/`expect` sequences get long
 and hard to follow. Wrapping a protocol in helper functions (as the interconnect
 tests in Chapter 12 do with `read`/`write`/`step`) hides the "bit-banging" and
 covers more cases in fewer lines. That pattern is the single biggest readability
-win for non-trivial test benches.
+win for non-trivial test benches. The counter device's `read`/`write` look like:
+
+```scala
+def step(n: Int = 1) = dut.clock.step(n)
+
+def read(addr: Int) = {
+  dut.io.address.poke(addr.U)
+  dut.io.rd.poke(true.B)
+  step()
+  dut.io.rd.poke(false.B)
+  while (!dut.io.ack.peekBoolean()) { step() }
+  dut.io.rdData.peekInt()
+}
+
+def write(addr: Int, data: Int) = {
+  dut.io.address.poke(addr.U)
+  dut.io.wrData.poke(data.U)
+  dut.io.wr.poke(true.B)
+  step()
+  dut.io.wr.poke(false.B)
+  while (!dut.io.ack.peekBoolean()) { step() }
+}
+```
+*illustrative — `read`/`write` helpers from the book's counter-device test*
+
+`read` pokes the address and asserts `rd`, steps the clock once, deasserts
+`rd`, then polls `io.ack` with `peekBoolean()` (a Scala `Boolean`) in a loop
+until the device acknowledges — generalizing beyond this device's one-cycle
+latency to devices that take longer. It finally reads `io.rdData` with
+`peekInt()`, which returns a Scala `BigInt` so it can express integers of any
+width. `write` is symmetric. **Caveat:** if a device never asserts `ack`, this
+polling loop hangs forever; a robust version should add a timeout around it.
+Writing the more thorough, function-based test actually caught a real bug: an
+off-by-one error (`until 3` instead of `until 4`) in the counter device that
+the original hand-written, bit-banging test had missed.
 
 ### Selecting tests with tags
 
@@ -78,12 +171,20 @@ which reports them as not run:
 [info] No tests were executed.
 ```
 
+If your tests (and tags) live inside a package, remember to give the **full
+reference path** to both the test and the tag — a bare class/tag name won't
+resolve.
+
 ### Accessing internal signals with `BoringUtils`
 
 Tests normally see only the ports — good practice. But sometimes you need an
-internal signal (e.g. compare a CPU's register file against a reference model).
+internal signal — e.g. comparing a CPU's register file against a reference
+model, since all data that's computed, loaded, or stored eventually passes
+through the register file. Another use case is exploring and testing a state
+machine (with or without a datapath) with direct access to its internal state.
 Rather than clutter the design with debug ports, `BoringUtils.bore` "bores" a
 connection out through the hierarchy, adding the needed ports automatically.
+At the time of writing, `BoringUtils` is still considered **experimental**.
 
 Our `TickGen` exposes only `tick`; a **test wrapper** bores out the hidden
 `cntReg`:
@@ -117,8 +218,28 @@ thread, `.join()` waits for it. Threads synchronize on `step`, and no two may
 
 By default ChiselTest uses **Treadle** (fast startup, no extra install). For
 large designs or features Treadle lacks, switch to **Verilator** (open-source)
-or **VCS** by adding a backend annotation to `.withAnnotations(...)`. Verilator
-is a synchronous simulator (no latches, single-clock); VCS is event-based.
+or **VCS** by adding a backend annotation to `.withAnnotations(...)`:
+
+```scala
+test(new Dut()).withAnnotations(Seq(VerilatorBackendAnnotation)) {
+  c => testFun(c)
+}
+```
+*illustrative — switching the backend to Verilator*
+
+`VerilatorFlags` and `VerilatorCFlags` annotations pass extra switches straight
+through to the Verilator simulation command and to GCC, respectively (consult
+the tool's manual for the flag list). These are advanced, seldom-needed
+features and are **not guaranteed to remain stable** across releases.
+ChiselTest 0.3.4+ also supports code-coverage measurement directly in
+simulation, which requires Verilator **4.028 or newer**.
+
+The backends differ in what they simulate: Verilator is a **synchronous**
+simulator (updates only on the rising clock edge), so it has no latches and
+does **not officially support multiple clocks**. VCS is **event-based** and
+supports all synthesizable Verilog constructs, including latches and multiple
+clocks, at the cost of being closed-source/commercial. For single-clock
+circuits, Verilator is generally the fastest and most widely available choice.
 
 ---
 
@@ -143,6 +264,16 @@ kept assertion still holds. The two commented-out assertions look reasonable but
 are **false on overflow** — exactly the kind of corner case a hand-written test
 usually misses, which motivates formal verification.
 
+A failing assertion stops the simulation with a message like:
+
+```
+Assertion failed
+    at Assert.scala:20 assert(sum <= a + b)
+```
+
+**Style tip:** place all assertions at the end of a module, so they don't
+clutter the reading of the module's intended design.
+
 ---
 
 ## 13.4 Formal verification
@@ -159,14 +290,17 @@ import chiseltest.formal._
 
 class FormalTest extends AnyFlatSpec with ChiselScalatestTester with Formal {
   "Assert" should "pass" in {
-    verify(new Assert(), Seq(BoundedCheck(5)))
+    verify(new Assert(), Seq(BoundedCheck(5), WriteVcdAnnotation))
   }
 }
 ```
 
 Run formally against the naive overflow assertions and the solver immediately
 finds a counterexample (e.g. `0xdb + 0x65` overflows to `0x40`), proving
-`sum >= a` is false — a bug a small test suite would miss.
+`sum >= a` is false — a bug a small test suite would miss. Adding
+`WriteVcdAnnotation` to the annotation list (as above) dumps the counterexample
+trace to a `.vcd`, so you can open it in GTKWave the same way as a regular
+simulation waveform.
 
 > **Not runnable here:** formal verification needs the
 > [Z3](https://github.com/Z3Prover/z3) theorem prover, which isn't installed in
@@ -212,9 +346,26 @@ emits `Assert.sv` and `TickGenTestTop.sv`.
 
 ## 13.7 Exercise
 
+[Extreme programming](https://en.wikipedia.org/wiki/Extreme_programming) is an
+agile software-development style built around quick turnaround times and a
+strong reliance on unit tests; in its purest form you write the tests *before*
+implementing a feature. It's not used all that often in real life, but
+exploring it is a good way to focus on testing as a first-class part of
+building something.
+
 Practice test-first design: pick a small circuit from Chapter 7 (debouncer or
 majority filter), write its test bench *before* implementing it, then build the
 design. Afterward, inject a fault into the DUT and confirm your tests catch it.
+
+Reflect on the experience. Did your tests find errors in your design? If all
+tests pass, are you sure they cover a reasonable design space? How do you test
+your tests?
+
+You may come away with the uncomfortable feeling that testing is hard and it's
+probably impossible to catch every error — echoing Dijkstra's famous line,
+"testing shows the presence of bugs, not their absence." Formal verification
+(§13.4) is the field's answer to that gap; the topic will be extended further
+in a future edition of this book.
 
 Back to the **[tutorial index](../README.md)**.
 Previous: **[Chapter 12 — Interconnect](../ch12-interconnect/README.md)**.

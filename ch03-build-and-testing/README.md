@@ -186,6 +186,12 @@ object HelloString extends App {
 }
 ```
 
+> Printing the Verilog as a `String` (the `HelloString` form) is popular for
+> showing small Chisel examples on
+> [Scastie](https://scastie.scala-lang.org/), a web-based Scala compiler and
+> runtime — see the book's
+> [Hello World on Scastie](https://scastie.scala-lang.org/schoeberl/SN7rDb9iS027ORiWqXMGsQ/6).
+
 ### 3.1.4 Tool flow
 
 <p align="center">
@@ -206,13 +212,69 @@ optional `Hello.vcd` waveform for GTKWave); the other path emits Verilog
 > Chisel → intermediate representation → simulate **or** emit HDL → synthesize —
 > is unchanged.
 
-### 3.1.5 Chisel, Scala, and Java versions
+### 3.1.5 Chisel versions (and the CIRCT switch)
+
+Chisel switched to **semantic versioning** (`MAJOR.MINOR.PATCH`) at **5.0.0**;
+before that the scheme was `3.MAJOR.MINOR`. A minor bump adds functionality in a
+backwards-compatible way; a major bump may break things — and to emphasize the
+scheme change, Chisel **skipped version 4**.
+
+Starting with **Chisel 5**, the backend changed from the Scala-based FIRRTL
+compiler to **`firtool`**, part of the [LLVM CIRCT](https://circt.llvm.org/)
+project (this is why modern Chisel emits `.sv`). The last "Chisel 3" release,
+**3.6**, ships *both* backends. Its `build.sbt` uses the `edu.berkeley.cs`
+package and the `chisel3` names:
+
+```scala
+scalaVersion := "2.13.14"
+
+scalacOptions ++= Seq(
+  "-deprecation", "-feature", "-unchecked", "-language:reflectiveCalls",
+)
+
+val chiselVersion = "3.6.1"
+addCompilerPlugin("edu.berkeley.cs" % "chisel3-plugin" % chiselVersion cross CrossVersion.full)
+libraryDependencies += "edu.berkeley.cs" %% "chisel3" % chiselVersion
+libraryDependencies += "edu.berkeley.cs" %% "chiseltest" % "0.6.1"
+```
+*illustrative*
+
+From **Chisel 5 on the libraries are published under `org.chipsalliance`**, and
+Chisel 5 requires installing the `firtool` binary manually. **Chisel 6 bundles
+`firtool`**, which is why it's the recommended version. Its `build.sbt` — the one
+this tutorial pins everywhere — is:
+
+```scala
+scalaVersion := "2.13.14"
+
+scalacOptions ++= Seq(
+  "-deprecation", "-feature", "-unchecked", "-language:reflectiveCalls",
+)
+
+val chiselVersion = "6.5.0"
+addCompilerPlugin("org.chipsalliance" % "chisel-plugin" % chiselVersion cross CrossVersion.full)
+libraryDependencies += "org.chipsalliance" %% "chisel" % chiselVersion
+libraryDependencies += "edu.berkeley.cs" %% "chiseltest" % "6.0.0"
+```
+*illustrative*
+
+The book covers, and has been tested with, **Chisel 3.5, 3.6, 5, and 6**.
+
+> **Future testing infrastructure.** The move to CIRCT affects testing. Newer
+> testing is expected to run through a Scala API on top of
+> [Verilator](https://www.veripool.org/verilator/) (making Verilator mandatory),
+> while CIRCT is also growing its own simulator, **Arcilator**. For now
+> **ChiselTest** — used throughout this tutorial — has been ported to Chisel 5
+> and 6, and a compatibility layer is expected in Chisel 7 for a smooth
+> transition.
+
+#### Chisel, Scala, and Java versions
 
 Chisel is a Scala library, and Scala runs on the JVM, so the three versions are
 linked. Java 8 is a safe baseline; Scala 2.13 is the safe choice (Chisel 6 is
-Scala-2.13 only). Because Chisel ships a Scala **compiler plugin**, the highest
-usable Scala *patch* version is limited by that plugin. Highest supported
-versions per Chisel release:
+Scala-2.13 only; Chisel worked with 2.12 and 2.13 up to version 5). Because
+Chisel ships a Scala **compiler plugin**, the highest usable Scala *patch*
+version is limited by that plugin. Highest supported versions per Chisel release:
 
 | Chisel | Scala | Java |
 |--------|-------|------|
@@ -244,8 +306,12 @@ full language available (loops, reference models, etc.).
 
 ### 3.2.1 ScalaTest (the foundation)
 
-ChiselTest extends ScalaTest, so meet ScalaTest first. This is a plain unit
-test — no hardware — that reads like an executable specification:
+ChiselTest extends ScalaTest, so meet ScalaTest first. (Used on its own,
+ScalaTest is pulled in with its own `build.sbt` line —
+`libraryDependencies += "org.scalatest" %% "scalatest" % "3.1.4" % "test"` —
+but here `chiseltest` already brings in a compatible ScalaTest, so we don't add
+it separately.) This is a plain unit test — no hardware — that reads like an
+executable specification:
 
 `src/test/scala/ExampleTest.scala`
 ```scala
@@ -287,7 +353,9 @@ Expected output:
 ```
 
 `sbt test` runs *all* suites (regression testing); `sbt "testOnly X"` runs one.
-(Misspell the name and you get a quiet `No tests were executed`.)
+(Misspell the name and you get a quiet `No tests were executed`.) Regression
+runs can get large — `sbt test` in the book's own repository passes more than 90
+tests.
 
 ### 3.2.2 ChiselTest
 
@@ -373,8 +441,20 @@ class SimpleTestExpect extends AnyFlatSpec with ChiselScalatestTester {
 }
 ```
 
-A passing `expect` prints nothing special; the suite just reports success. A
-**failing** `expect` reports the mismatch and where it happened. If you changed
+A passing `expect` prints no hardware values — just that the suite passed:
+
+```
+[info] SimpleTestExpect:
+[info] DUT
+[info] - should pass
+[info] Run completed in 1 second, 85 milliseconds.
+[info] Total number of tests run: 1
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 1, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+A **failing** `expect` reports the mismatch and where it happened. If you changed
 the last line to `expect(4.U)` you'd see:
 
 *illustrative — output of a deliberately broken expect*
@@ -384,7 +464,11 @@ the last line to `expect(4.U)` you'd see:
                    (lines in testing.scala: 27) (testing.scala:35)
 ```
 
-You can also read outputs into Scala types and use plain `assert` — handy when
+The plain **`peek()`** returns a *Chisel* type, which you'd have to convert to
+use in Scala. To make that easy, ChiselTest adds **`peekInt()`** and
+**`peekBoolean()`**, which hand back Scala values directly. (`peekInt()` returns
+a Scala **`BigInt`**, not `Int`, so it can represent arbitrarily wide signals.)
+You can read outputs into Scala types and use plain `assert` — handy when the
 test logic needs the value (e.g. looping until a condition holds):
 
 `src/test/scala/testing.scala`
@@ -430,7 +514,9 @@ $ sbt "testOnly WaveformTest"
 This writes the waveform to
 `test_run_dir/Waveform_should_pass/DeviceUnderTest.vcd`. Open it in
 [GTKWave](http://gtkwave.sourceforge.net/) (*File → Open New Window*), then drag
-signals from the left panel into the wave view.
+signals from the left panel into the wave view. Once you've arranged a useful set
+of signals, save that layout with *File → Write Save File* and reload it later
+with *File → Read Save File*, so you don't re-drag signals each session.
 
 > The command-line form `sbt "testOnly WaveformTest -- -DwriteVcd=1"` does the
 > same without the annotation in the source.
@@ -550,6 +636,32 @@ interleaved above):
 4. **Add a test (from the book).** Take your AND-gate / multiplexer design from
    the Chapter 2 exercise, write a ChiselTest that enumerates all inputs with
    Scala loops, and check each output with `expect()`.
+5. **Anatomy of a minimal project (from the book).** In `chisel-examples`,
+   explore the [`hello-world`](https://github.com/schoeberl/chisel-examples/tree/master/hello-world)
+   project — the smallest real Chisel project. Note that `Hello.scala` is the
+   single source (the `class Hello` plus the `App` that emits Verilog), and that
+   every file begins by importing Chisel. Open the Quartus project for the
+   DE2-115 under `quartus/altde2-115/`; its
+   [`hello.qsf`](https://github.com/schoeberl/chisel-examples/blob/master/hello-world/quartus/altde2-115/hello.qsf)
+   is a plain-text file listing the device, source files, and **pin
+   assignments** — find which pins map to `clock`, `reset`, and `io_led` (this is
+   what you'd edit to retarget another board). With Quartus installed, open the
+   project, compile with the green **Play** button, and configure the FPGA. The
+   project also ships a `Makefile` that just wraps `sbt`, so `make` generates the
+   Verilog.
+6. **Try a floating version (from the book).** Temporarily change the
+   `hello-world` `build.sbt` dependency to
+   `libraryDependencies += "edu.berkeley.cs" %% "chisel3" % "latest.release"`,
+   rerun `sbt`, and observe: is a newer Chisel fetched automatically? (This is
+   why we otherwise **pin** a concrete version — a floating one needs the network
+   on every build.)
+
+> **Reality check beyond simulation.** ChiselTest speeds up debugging, but it's
+> still worth synthesizing your design for an FPGA and testing it there: only
+> then do you see the true **resource use** (LUTs and flip-flops) and **maximum
+> clock frequency**. As a rough reference point, a textbook pipelined RISC
+> processor uses about **3000 4-input LUTs** and runs around **100 MHz** on a
+> low-cost FPGA (Intel Cyclone or Xilinx Spartan).
 
 Back to the **[tutorial index](../README.md)**.
 Previous: **[Chapter 2 — Basic Components](../ch02-basic-components/README.md)**.

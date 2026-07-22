@@ -66,6 +66,16 @@ UInt(8.W)   // 8-bit unsigned integer
 SInt(10.W)  // 10-bit signed integer
 ```
 
+A width need not be a literal — you can cast a **Scala** `Int` variable `n` to a
+Chisel `Width` with `.W` and use it wherever a width is expected. This is the
+first hint of Chisel's generator power (a width computed at build time):
+
+`src/main/scala/Logic.scala`
+```scala
+n.W
+Bits(n.W)
+```
+
 **Constants** are made by converting a Scala number with `.U` (unsigned),
 `.S` (signed), or `.B` (Bool):
 
@@ -76,9 +86,17 @@ SInt(10.W)  // 10-bit signed integer
 3.U(4.W)     // a 4-bit constant of value 3
 ```
 
+> If the `3.U` / `4.W` notation looks odd, read it as a typed integer constant —
+> like `3L` for a `long` in C, Java, and Scala.
+
 > **Pitfall (from the book):** to give a constant a width you must use `.W`.
 > Writing `1.U(32)` does **not** make a 32-bit constant — `(32)` is read as
 > *bit-extraction at index 32*, giving a single 0 bit. Always write `1.U(32.W)`.
+
+Chisel benefits from **Scala's type inference**, and in many places the type — and
+the bit width — can be left out for Chisel to infer. That is why a Chisel
+description is often more concise and readable than the equivalent VHDL or
+Verilog. (Even so, spelling out widths at creation is good practice; see §2.8.)
 
 Non-decimal constants use a string prefixed by `h` (hex), `o` (octal), or `b`
 (binary); underscores group digits and are ignored:
@@ -136,6 +154,7 @@ a ^ b   // XOR        -a       // negate
                        a / b   // divide
                        a % b   // modulo
 ```
+*illustrative*
 
 Width rules: add/subtract → max of the two widths; multiply → sum of widths;
 divide/modulo → width of the numerator.
@@ -156,6 +175,12 @@ divide/modulo → width of the numerator.
 
 > **Note** equality is `===` (three equals) and inequality is `=/=`, because
 > Scala already uses `==`/`!=` for object comparison.
+
+> **Operator precedence.** Chisel's operator precedence is a side effect of how
+> the hardware tree is built as the Scala operators execute, so it follows
+> **Scala's** precedence — which is *similar but not identical* to Java/C (and
+> different again from VHDL, where all logic operators share one precedence and
+> evaluate left-to-right). When in doubt, **use parentheses.**
 
 | Function | Description | Types |
 |----------|-------------|-------|
@@ -240,6 +265,11 @@ val r3 = RegNext(d, 0.U)     // input d, resets to 0
 
 **Naming convention:** postfix register names with `Reg` (e.g. `cntReg`,
 `blkReg` from Chapter 1) so readers can tell state from combinational wires.
+Following Java/Scala custom, use **CamelCase** for multi-word identifiers, with
+functions and variables starting lower-case and classes/types (a `Module` name,
+say) upper-case. Names are otherwise up to you — pick descriptive ones — but a
+handful of words are **reserved** (listed in the book's *Reserved Keywords*
+appendix).
 
 ### Counting
 
@@ -267,26 +297,73 @@ Chisel groups related signals two ways:
   VHDL `record`). You define one by extending `Bundle`. Every `io = IO(new
   Bundle { ... })` you have written *is* a bundle.
 - **`Vec`** — an indexable collection of the **same** type (like an array).
-  Used for: dynamic (hardware) indexing = a multiplexer; register files; and
-  parameterizing the number of ports. For collections of *generator* data
-  (not hardware) use a Scala `Seq` instead.
+  A `Vec` serves three purposes: (1) dynamic (hardware) indexing = a multiplexer;
+  (2) register files (multiplexing the read, generating the write-enable); and
+  (3) parameterizing the number of ports of a `Module`. For collections of
+  *generator* data (or hardware elements you don't index in hardware) use a Scala
+  `Seq` instead.
+
+Both create **new, user-defined Chisel types** and can be nested arbitrarily.
+
+### Bundle
+
+Define a bundle by extending `Bundle` and listing its fields as `val`s:
 
 *illustrative*
 ```scala
-// a combinational Vec is just a multiplexer; wrap it in a Wire
-val v = Wire(Vec(3, UInt(8.W)))
-val out = v(index)                 // dynamic index = mux
+class Channel() extends Bundle {
+  val data = UInt(32.W)
+  val valid = Bool()
+}
+```
 
-// VecInit builds a Vec that already has values (no Wire needed)
-val defVec = VecInit(0.U(4.W), 1.U, 2.U)
+Create one with `new`, wrap it in a `Wire`, and access fields with dot notation:
 
-// a Vec wrapped in a register = an array of registers
-val regVec = Reg(Vec(3, UInt(8.W)))
+*illustrative*
+```scala
+val ch = Wire(new Channel())
+ch.data := 123.U
+ch.valid := true.B
+
+val b = ch.valid
+```
+
+A bundle can also be referenced as a whole:
+
+*illustrative*
+```scala
+val channel = ch
+```
+
+### Vec
+
+A combinational `Vec` is created with a size and an element type, and **wrapped
+in a `Wire`**; individual elements are accessed with `(index)`:
+
+*illustrative*
+```scala
+val v = Wire(Vec(3, UInt(4.W)))
+
+v(0) := 1.U
+v(1) := 3.U
+v(2) := 5.U
+
+val index = 1.U(2.W)
+val a = v(index)         // dynamic index = a multiplexer
 ```
 
 A combinational `Vec` indexed by a signal is **literally a multiplexer**. For
 example, connecting three wires `x`, `y`, `z` into a `Vec` and reading it with a
 `select` signal picks one of them onto `muxOut`:
+
+*illustrative*
+```scala
+val m = Wire(Vec(3, UInt(8.W)))
+m(0) := x
+m(1) := y
+m(2) := z
+val muxOut = m(select)
+```
 
 <p align="center">
   <img src="figures/vec-mux.png" alt="A vector wrapped in a Wire is just a multiplexer" width="300">
@@ -295,6 +372,32 @@ example, connecting three wires `x`, `y`, `z` into a `Vec` and reading it with a
 ***Figure 2.4** — A `Vec` wrapped in a `Wire` is just a multiplexer. The three
 inputs `x`, `y`, `z` become the mux inputs `0`, `1`, `2`; `select` chooses which
 one drives `muxOut`.*
+
+Like `WireDefault`, **`VecInit`** gives a `Vec` default values. The following is
+a 3:1 multiplexer with three constant defaults (the width, 3 bits, is set on the
+first constant), which a `when` can overwrite (three more 2:1 muxes); the last
+line selects one input. `VecInit` **already returns hardware**, so — unlike a
+plain `Vec` — it need not be wrapped in a `Wire`:
+
+*illustrative*
+```scala
+val defVec = VecInit(1.U(3.W), 2.U, 3.U)
+when (cond) {
+  defVec(0) := 4.U
+  defVec(1) := 5.U
+  defVec(2) := 6.U
+}
+val vecOut = defVec(sel)
+```
+
+`VecInit` can be fed **signals**, not just constants — here wires `d`, `e`, `f`
+drive the three `Vec` inputs:
+
+*illustrative*
+```scala
+val defVecSig = VecInit(d, e, f)
+val vecOutSig = defVecSig(sel)
+```
 
 Wrapping a `Vec` in a **register** instead gives an array of registers with
 one write port and one read port:
@@ -310,6 +413,42 @@ exactly the structure the register file below scales up to 32 entries.*
 
 Both concepts come together in the register file below, which **is** a file in
 this project.
+
+### Combining `Bundle` and `Vec`
+
+Bundles and vectors mix freely. A **`Vec` of a `Bundle`** type takes the bundle
+as its element prototype:
+
+*illustrative*
+```scala
+val vecBundle = Wire(Vec(8, new Channel()))
+```
+
+A **`Bundle` containing a `Vec`** field:
+
+*illustrative*
+```scala
+class BundleVec extends Bundle {
+  val field = UInt(8.W)
+  val vector = Vec(4, UInt(8.W))
+}
+```
+
+For a **register of a bundle type that needs a reset value**, first build a
+`Wire` of the bundle, set its fields, then pass it to `RegInit`:
+
+*illustrative*
+```scala
+val initVal = Wire(new Channel())
+
+initVal.data := 0.U
+initVal.valid := false.B
+
+val channelReg = RegInit(initVal)
+```
+
+Combining `Bundle`s and `Vec`s lets you define your own powerful data-structure
+abstractions.
 
 ---
 
@@ -365,6 +504,19 @@ Read this carefully — it packs several ideas:
   produces two different circuits (with or without a debug port) depending on a
   constructor argument. This is the kind of thing Verilog/VHDL cannot do
   cleanly and where Chisel shines.
+
+The `Seq.fill(32)(0.U(32.W))` above resets *every* register to the same value.
+When you instead want **distinct reset values per register**, list them in the
+`VecInit` directly (and you can still connect each element's input separately):
+
+*illustrative*
+```scala
+val initReg = RegInit(VecInit(0.U(3.W), 1.U, 2.U))
+val resetVal = initReg(sel)
+initReg(0) := d
+initReg(1) := e
+initReg(2) := f
+```
 
 ---
 
@@ -429,13 +581,28 @@ val w = Wire(UInt(8.W))  //  =  : create and name the hardware
 w := a & b               //  := : drive a value onto existing hardware
 ```
 
+(Scala also has mutable `var`, but it is useless for describing hardware — you
+name hardware once with `val` and drive it with `:=`.)
+
 Best practices the book stresses:
 
 - Give combinational `Wire`s a **default value** so they are assigned on every
   path (an unassigned combinational signal would be a latch, which Chisel
-  rejects). `WireDefault(0.U)` is the idiom.
+  rejects). `WireDefault` folds the default into the declaration:
+
+  *illustrative*
+  ```scala
+  val number = WireDefault(10.U(4.W))
+  ```
 - Give registers a **reset value** (`RegInit`) so simulation/verification is
-  deterministic.
+  deterministic:
+
+  *illustrative*
+  ```scala
+  val reg = RegInit(0.S(8.W))
+  ```
+  (Leaving a register undefined at reset can save some load on the reset wire,
+  but known reset values simplify testing and verification.)
 - Specify **bit widths** at creation even though Chisel can infer them.
 
 ---
@@ -607,10 +774,32 @@ index 4. A second test builds the module *without* the debug port
 3. **Shrink the register file.** Change `RegisterFile` from 32 to 8 registers
    (the `Seq.fill(32)` and the `Vec(32, …)`), regenerate, and confirm
    `RegisterFile.sv` now has `io_dbgPort_0 … io_dbgPort_7`.
-4. **From the book (FPGA):** extend the Chapter 1 blinking LED with two switch
-   inputs (`val sw = Input(UInt(2.W))`) and drive the LED with a combinational
-   function of the switches (AND, then a 2:1 mux). This needs a board; if you
-   have none, express it here and inspect the generated SystemVerilog instead.
+4. **From the book (FPGA):** take the Chapter 1 blinking-LED project (from
+   `chisel-examples`), copy it to a new folder, and add switch inputs to its `io`
+   bundle:
+
+   ```scala
+   val sw = Input(UInt(2.W))
+   ```
+   *illustrative*
+
+   You must also **assign the FPGA pins** for those switches — see the pin
+   assignments in a Quartus project file such as the DE2-115 board's
+   [`alu.qsf`](https://github.com/schoeberl/chisel-examples/blob/master/quartus/altde2-115/alu.qsf)
+   (this can also be done in the tool's GUI). Then work up in three steps:
+
+   1. **Prove inputs work first.** Drop *all* blinking logic and wire **one
+      switch straight to the LED**. Compile, configure the board: can you switch
+      the LED on and off? If yes, inputs are working; if not, debug the pin
+      configuration before going further.
+   2. **A combinational function.** Use **two switches**, `AND` them onto the
+      LED, then **change the function** (try OR, XOR).
+   3. **A multiplexer.** Use **three switches**: one as the select signal and the
+      other two as the inputs of a 2:1 mux driving the LED.
+
+   No board? Express each step here and inspect the generated SystemVerilog
+   instead. (Chapter 3 introduces a testing framework so you can check circuits
+   *without* an FPGA and physical switches.)
 
 Back to the **[tutorial index](../README.md)**.
 Next: **[Chapter 3 — Build Process and Testing](../ch03-build-and-testing/README.md)**.

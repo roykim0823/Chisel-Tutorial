@@ -29,6 +29,54 @@ onto from the start:
 
 You do **not** need to know Verilog or VHDL to follow along.
 
+### Who this is for
+
+Chisel (and the book this tutorial follows) targets **two groups**:
+
+1. **Hardware designers** fluent in VHDL or Verilog — who today reach for Python,
+   Java, or Tcl to *generate* hardware — can move to a single language where
+   hardware generation is part of the language itself.
+2. **Software programmers** curious about hardware design (increasingly relevant
+   as CPUs ship with programmable fabric to accelerate software).
+
+Chisel raises the abstraction level above traditional digital-design books so
+you can build more complex, interacting systems in less time. It brings software
+engineering — object-oriented and functional programming — into digital design,
+and lets you describe hardware not just at the register-transfer level but as
+reusable **generators**. It is perfectly fine for Chisel to be your first
+hardware description language.
+
+### What you'll need (and what you won't)
+
+This is a tutorial in digital design and Chisel — **not** a general introduction
+to digital-design fundamentals (if you need to know how a gate is built from CMOS
+transistors, consult a dedicated digital-design text). It assumes:
+
+- basic **Boolean algebra** and the **binary number system**,
+- some **programming experience** in any language, and
+- basic **command-line / terminal (CLI)** familiarity, since the build uses
+  `sbt` and `make`.
+
+No Verilog or VHDL knowledge is required. Verilog appears only as the
+intermediate language Chisel emits for simulation and synthesis.
+
+> **On Chisel and Scala.** Chisel is not a big language — its core constructs fit
+> on [one page](https://github.com/freechipsproject/chisel-cheatsheet/releases/latest/download/chisel_cheatsheet.pdf)
+> and can be learned in a few days (it is smaller than VHDL/Verilog, which carry
+> many legacies). Its power comes from being embedded in **Scala**, "a language
+> that grows on you." You do not need to learn Scala first; Chapter 10 gives the
+> Scala-for-hardware-designers primer. This tutorial is neither a Scala textbook
+> nor a Chisel language reference.
+
+Every code example in this tutorial (as in the book) is compiled and tested, so
+snippets should be free of syntax errors, and the examples aim to show not just
+working Chisel but **good hardware-description style**.
+
+> **Toolchain setup** (Java JDK 8–21, `sbt`, an optional IDE, and the `$`-prompt
+> convention used in the command blocks) is a one-time step covered in the
+> [tutorial index / README](../README.md#prerequisites). For building on a real
+> FPGA you also need a vendor synthesis tool — see the exercise in §1.6.
+
 ---
 
 ## 1.1 What's in this project
@@ -273,6 +321,8 @@ project or a simulation of the LED (the book does that in the companion
 
 ## 1.6 Exercises
 
+These first three exercises use only this project:
+
 1. **Change the blink rate.** Edit `CNT_MAX` in `src/main/scala/Hello.scala`
    (e.g. blink at 2 Hz or 0.5 Hz), re-run `sbt "runMain Hello"`, and confirm the
    constant in `Hello.sv` changes accordingly.
@@ -280,9 +330,116 @@ project or a simulation of the LED (the book does that in the companion
    SystemVerilog in the terminal. Compare it to the `Hello.sv` file.
 3. **Tidy output.** Run `sbt "runMain HelloOption"` and find the generated file
    under `generated/`.
-4. **(Stretch, from the book)** Make the LED on for 200 ms of every second
-   (a short "sign-of-life" flash) instead of a 50/50 blink. Hint: use a second
-   constant for the point at which you flip `blkReg`, separate from the counter
-   reset value.
 
+### 4. Get a real LED blinking on an FPGA (the book's exercise)
+
+The book's introduction exercise runs the blinking LED on an actual board. It
+uses the companion **[`chisel-examples`](https://github.com/schoeberl/chisel-examples)**
+repo (a superset of what's here), where `hello-world/` is set up as a minimal
+project:
+
+```
+$ git clone https://github.com/schoeberl/chisel-examples.git
+$ cd chisel-examples/hello-world/
+$ sbt run
+```
+
+After the initial download this produces the Verilog file (`Hello.v` in the
+book's older Chisel; `.sv` today). **Explore it:** it has two inputs `clock` and
+`reset` and one output `io_led`, even though the Chisel module declares none of
+them — Chisel adds `clock`/`reset` implicitly and wires every register to them,
+so in most designs you never deal with these low-level details by hand.
+
+Next, build it for a board:
+
+1. Set up an FPGA **project file** for your synthesis tool, **assign the pins**,
+   **compile** the Verilog, and **configure** the FPGA with the resulting
+   bitfile. ("Compile" here really means: synthesize the logic, place and route,
+   run timing analysis, and generate a bitfile.)
+2. You need a vendor synthesis tool. Intel's **Quartus Prime Lite** and AMD's
+   **Vivado WebPACK** are free for small/medium FPGAs (both Windows/Linux, not
+   macOS); **[F4PGA](https://f4pga.org/)** is a fully open-source alternative for
+   selected FPGAs. Consult the tool's manual for the exact steps — the
+   `chisel-examples` repo ships ready-made **Quartus projects** (folder
+   `quartus/`) for popular boards such as the DE2-115. If yours is supported,
+   open the project, press **Play** to compile, then **Programmer** to configure
+   the board.
+
+**Congratulations — you have your first Chisel design running on an FPGA!** If the
+LED doesn't blink, check the **reset**: on the DE2-115 the reset input is wired to
+switch **SW0**.
+
+Now change the blinking frequency and rebuild. Blink rates and patterns convey
+different "emotions": a slow blink says *everything is OK*, a fast blink signals
+*alarm*. Explore which frequencies best express each.
+
+As a harder extension, make the LED on for **200 ms of every second** (a short
+"sign-of-life" flash). Decouple the LED toggle from the counter reset — use a
+**second constant** for the point at which you flip `blkReg`, separate from the
+counter's reset value. What emotion does this pattern produce — alarming, or more
+a sign of life?
+
+### 5. No board? Simulate it
+
+You can run the blinking LED without hardware, using Chisel's simulation. To keep
+the simulation short, **lower the clock constant in the Chisel code from
+`50000000` to `50000`**, then:
+
+```
+$ sbt test
+```
+
+The tester runs for one million clock cycles. Because the perceived blink rate
+depends on your host's simulation speed, you may need to experiment with the
+assumed clock frequency to actually *see* the simulated LED blink. (This project
+has no test bench of its own; the runnable tester lives in the `chisel-examples`
+`hello-world` project. We introduce Chisel testing properly in Chapter 2's test
+bench and in Chapter 3.)
+
+---
+
+## 1.7 Source access, the book, and further reading
+
+**Source & the book.** This tutorial is derived from Martin Schoeberl's
+open-source book *Digital Design with Chisel*
+([`schoeberl/chisel-book`](https://github.com/schoeberl/chisel-book)), which is
+free as a PDF and available in print from
+[Amazon](https://www.amazon.com/dp/168933603X/). All of the book's code examples
+are compiled and CI-tested, and larger designs are collected in
+[`chisel-examples`](https://github.com/schoeberl/chisel-examples) and
+[`ip-contributions`](https://github.com/freechipsproject/ip-contributions). Found
+a typo or error (here or in the book)? A GitHub pull request or issue is the most
+convenient way to fix it. The book repo also ships LaTeX **slides** and
+**lab exercises** for a 13-week
+[Digital Electronics](http://www2.imm.dtu.dk/courses/02139/) course at DTU, and
+builds end-to-end with a single `make`.
+
+**Further reading** for digital design and Chisel:
+
+- **[Digital Design: A Systems Approach](http://www.cambridge.org/es/academic/subjects/engineering/circuits-and-systems/digital-design-systems-approach)**
+  — a digital-design textbook by William J. Dally and R. Curtis Harting
+  (Verilog and VHDL editions). Several later chapters' exercises cite it.
+- The **[Chisel home page](https://www.chisel-lang.org/)** — the official place
+  to download and learn Chisel.
+- The **[Digital Electronics 2](http://www2.imm.dtu.dk/courses/02139/)** course
+  at DTU — slides for a 13-week Chisel-based course (source in the book repo).
+- **[schoeberl/chisel-lab](https://github.com/schoeberl/chisel-lab)** — Chisel
+  exercises for that course; also good for self-study alongside the book.
+- **[chisel-empty](https://github.com/schoeberl/chisel-empty)** — a minimal
+  starter project (an adder + a test), usable as a GitHub template.
+- The **[Chisel3 Cheat Sheet](https://github.com/freechipsproject/chisel-cheatsheet/releases/latest/download/chisel_cheatsheet.pdf)**
+  — the main Chisel constructs on a single page.
+- Scott Beamer's **[Agile Hardware Design](https://classes.soe.ucsc.edu/cse228a/Winter24/)**
+  course — advanced Chisel; [lectures](https://github.com/agile-hw/lectures) are
+  runnable Jupyter notebooks.
+- **[ChiselTest](https://github.com/ucb-bar/chiseltest)** — the testing library,
+  in its own repository.
+- The **[Generator Bootcamp](https://github.com/freechipsproject/chisel-bootcamp)**
+  — a Chisel course focused on hardware generators, as a Jupyter notebook.
+- The **[Chisel Tutorial](https://github.com/ucb-bar/chisel-tutorial)** — a
+  ready project of small exercises with testers and solutions (a bit outdated).
+- A **[Chisel Style Guide](https://github.com/ccelio/chisel-style-guide)** by
+  Christopher Celio.
+
+Back to the **[tutorial index](../README.md)**.
 Next: **[Chapter 2 — Basic Components](../ch02-basic-components/README.md)**.

@@ -31,9 +31,12 @@ ch09-communicating-state-machines/
 
 ## 9.1 A light flasher
 
+This example is taken from Dally, Harting & Aamodt's VHDL textbook, Chapter 17.[^dally]
+
 Spec: on a one-cycle `start`, flash the light **three times** — on for 6 cycles,
 off for 4 cycles between flashes — then wait. A direct FSM needs **27 states**
-(1 idle + 3×6 on + 2×4 off). Instead, factor it: a **master FSM** does the
+(1 idle + 3×6 on + 2×4 off — the state diagram for this direct implementation
+is on p. 376 of the same book). Instead, factor it: a **master FSM** does the
 flashing logic, a **timer FSM** does the waiting.
 
 <p align="center">
@@ -57,9 +60,46 @@ when (timerLoad) {
 }
 ```
 
-The master FSM (`Flasher`) still has six states — `flash1/2/3` and `space1/2`
-are near-duplicates. Factoring the *flash count* into a **second counter FSM**
-reduces the master to three states (`off`, `flash`, `space`):
+The master FSM (`Flasher`) implements the blinking sequence directly, with a
+state for every phase — `off`, `flash1`, `space1`, `flash2`, `space2`,
+`flash3` — each one waiting for `timerDone` and (in the `off` state) loading
+the timer:
+
+`src/main/scala/Flasher.scala`
+```scala
+switch(stateReg) {
+  is(off) {
+    timerLoad := true.B
+    timerSelect := true.B
+    when (start) { stateReg := flash1 }
+  }
+  is (flash1) {
+    timerSelect := false.B
+    light := true.B
+    when (timerDone) { stateReg := space1 }
+  }
+  is (space1) {
+    when (timerDone) { stateReg := flash2 }
+  }
+  is (flash2) {
+    timerSelect := false.B
+    light := true.B
+    when (timerDone) { stateReg := space2 }
+  }
+  is (space2) {
+    when (timerDone) { stateReg := flash3 }
+  }
+  is (flash3) {
+    timerSelect := false.B
+    light := true.B
+    when (timerDone) { stateReg := off }
+  }
+}
+```
+
+`flash1/2/3` and `space1/2` are near-duplicates. Factoring the *flash count*
+into a **second counter FSM** reduces the master to three states (`off`,
+`flash`, `space`):
 
 <p align="center">
   <img src="figures/flasher2.png" alt="Flasher split into master, timer, and counter FSMs" width="420">
@@ -87,16 +127,39 @@ switch(stateReg) {
 }
 ```
 
+The three-state master needs a companion: a **down-counter FSM** that tracks
+the *remaining* flashes and tells the master when it has flashed enough:
+
+`src/main/scala/Flasher.scala`
+```scala
+val cntReg = RegInit(0.U)
+cntDone := cntReg === 0.U
+
+when(cntLoad) { cntReg := 2.U }
+when(cntDecr) { cntReg := cntReg - 1.U }
+```
+
+Note it is loaded with **2**, not 3, even though the spec asks for three
+flashes: the counter tracks *remaining* flashes after the current one, and it
+is only decremented in the `space` state (once `timerDone`), so the third
+flash finishes with the counter already at 0 (`cntDone`).
+
 `Flasher2` is more configurable — changing the interval lengths or the number of
 flashes needs no FSM changes, only the load constants. Both versions share
 `FlasherBase`, so one test drives them identically.
+
+[^dally]: W. J. Dally, R. C. Harting, and T. M. Aamodt, *Digital Design Using
+VHDL: A Systems Approach*, Cambridge University Press, 2016.
 
 ---
 
 ## 9.2 A state machine with a datapath (FSMD)
 
 A very common pattern: an FSM **controls** a datapath that does the
-**computation**. Here we compute a **popcount** (number of set bits).
+**computation**. Here we compute a **popcount** — also known as the
+**[Hamming weight](https://en.wikipedia.org/wiki/Hamming_weight)** — the number
+of symbols different from the zero symbol, which for a bit string is simply
+the number of set bits.
 
 <p align="center">
   <img src="figures/popcnt-fsmd.png" alt="A state machine with a datapath" width="420">
@@ -144,7 +207,37 @@ when (!done) { counterReg := counterReg - 1.U }
 when(io.load) { dataReg := io.din; popCntReg := 0.U; counterReg := 8.U }
 ```
 
-The top-level `PopulationCount` instantiates both and wires control to status.
+The top-level `PopulationCount` instantiates both and wires control to status
+— `dinValid`/`dinReady`/`popCntValid`/`popCntReady` connect to the FSM,
+`din`/`popCnt`/`load`/`done` connect to the datapath:
+
+`src/main/scala/PopulationCount.scala`
+```scala
+class PopulationCount extends Module {
+  val io = IO(new Bundle {
+    val dinValid = Input(Bool())
+    val dinReady = Output(Bool())
+    val din = Input(UInt(8.W))
+    val popCntValid = Output(Bool())
+    val popCntReady = Input(Bool())
+    val popCnt = Output(UInt(4.W))
+  })
+
+  val fsm = Module(new PopCountFSM)
+  val data = Module(new PopCountDataPath)
+
+  fsm.io.dinValid := io.dinValid
+  io.dinReady := fsm.io.dinReady
+  io.popCntValid := fsm.io.popCntValid
+  fsm.io.popCntReady := io.popCntReady
+
+  data.io.din := io.din
+  io.popCnt := data.io.popCnt
+  data.io.load := fsm.io.load
+  fsm.io.done := data.io.done
+}
+```
+
 (The datapath includes a `printf` "debug output" — you'll see it print each
 cycle during the test.)
 
@@ -153,8 +246,10 @@ cycle during the test.)
 ## 9.3 The ready/valid interface
 
 To move data between subsystems, the **ready/valid** handshake is the standard:
-the sender asserts `valid` when data is available, the receiver asserts `ready`
-when it can accept, and the transfer happens on the cycle **both** are high.
+the sender (also called the **producer** or **source**) asserts `valid` when
+data is available, the receiver (also called the **consumer** or
+**destination**) asserts `ready` when it can accept, and the transfer happens
+on the cycle **both** are high.
 
 <p align="center">
   <img src="figures/readyvalid.png" alt="The ready/valid flow control" width="420">
@@ -162,6 +257,25 @@ when it can accept, and the transfer happens on the cycle **both** are high.
 
 ***Figure 9.6** — Ready/valid: `data` + `valid` from the sender, `ready` from
 the receiver; transfer when both are asserted.*
+
+The book illustrates three timing variations as waveform diagrams; described
+here in prose instead:
+
+- *Early ready.* The receiver asserts `ready` from clock cycle 2 on, before the
+  sender has any data. The transfer happens in cycle 4, once `valid` also
+  rises; from cycle 5 on neither the sender has data nor the receiver is ready
+  for the next transfer. When a receiver can always accept data, this becomes
+  an **"always ready"** interface, and `ready` can simply be hardcoded to
+  `true`.
+- *Late ready.* The sender asserts `valid` from clock cycle 2 on, before the
+  receiver is ready. The transfer again happens in cycle 4, and from cycle 5 on
+  neither signal is asserted again. Symmetrically, one could imagine an
+  **"always valid"** interface — but then the data probably wouldn't change on
+  `ready` being asserted, so the handshake signals would simply be dropped.
+- *Single-cycle ready/valid and back-to-back transfers.* `ready` and `valid`
+  can both be asserted for just a single clock cycle — transferring `D1` — or
+  data can be transferred **back-to-back**, on consecutive clock cycles, as
+  with `D2` followed immediately by `D3`.
 
 Chisel packages this as **`DecoupledIO`** (in `chisel3.util`), parameterized by
 the data type, with the data in a field called `bits`:
@@ -175,10 +289,28 @@ class DecoupledIO[T <: Data](gen: T) extends Bundle {
 }
 ```
 
+One question the interface leaves open: may `ready` or `valid` be de-asserted
+again after being raised, if no transfer took place in between (e.g. a
+receiver that was ready for a while becomes not ready for some unrelated
+reason, or a sender's data stops being valid without a transfer happening)?
+`DecoupledIO` places no requirement either way — whether this is allowed is
+left to the concrete usage of the interface.
+
 > To stay composable, neither `ready` nor `valid` may depend combinationally on
 > the other. `DecoupledIO` places no ordering rules; `IrrevocableIO` adds the
 > convention (used by AXI) that once `valid` is raised it stays until the
 > transfer, and `bits` doesn't change.
+
+The **AXI** bus builds on exactly this convention, but goes further: it uses
+**four separate ready/valid channels** — read address, read data, write
+address, and write data. On every one of them, AXI additionally forbids the
+sender from waiting for `ready` before asserting `valid` in the first place
+(it may only hold `valid` once raised, per `IrrevocableIO`, until the transfer
+happens). The receiver side is more relaxed — it may lower `ready` again
+before `valid` is asserted, and it is allowed to wait for `valid` before
+asserting `ready`. Note that this is *just* a convention: it cannot be
+enforced merely by using the `IrrevocableIO` class — the hardware still has to
+be designed to honor it.
 
 A one-word buffer uses a `DecoupledIO` on each side. A single `emptyReg` is a
 two-state Moore FSM (empty/full); `in.ready`/`out.valid` come only from that

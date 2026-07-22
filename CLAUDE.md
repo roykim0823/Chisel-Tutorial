@@ -49,6 +49,21 @@ prose, snippets, figures, and tables):
 | 1 | Introduction | ~447–839 | `HelloScala.scala`, `Hello.scala` |
 | 2 | Basic Components | ~840–1455 | `Logic.scala`, `RegisterFile.scala` |
 | 3 | Build Process and Testing | ~1456–2230 | (not built yet) |
+| 4 | Components | ~2231–2462 | `Comp.scala`, `Adder.scala` |
+| 5 | Combinational Building Blocks | ~2463–2834 | `Combinational.scala`, `EncDec.scala`, `arbiter.scala`, `Comparator.scala` |
+| 6 | Sequential Building Blocks | ~2835–3492 | |
+| 7 | Input Processing | ~3493–3760 | |
+| 8 | Finite-State Machines | ~3761–4104 | |
+| 9 | Communicating State Machines | ~4105–4445 | |
+| 10 | Hardware Generators | ~4446–5154 | |
+| 11 | Example Designs | ~5155–5758 | |
+| 12 | Interconnect | ~5759–6234 | |
+| 13 | Debugging, Testing, and Verification | ~6235–6598 | |
+| 14 | Design of a Processor | ~6599–7098 | |
+| 15 | A RISC-V Pipeline | ~7099–7423 | |
+
+(Book appendices — VHDL/Verilog, Reserved Keywords, etc. — start at line ~7424
+and are not turned into chapter projects.)
 
 Book code snippets are extracted from `../src/**` between `//- start NAME` /
 `//- end` markers (see `../scripts/gencode.scala`). When copying code into a
@@ -84,6 +99,33 @@ something visible.
 **Always actually run `sbt`** and paste the *real* captured output into the
 README's "expected output" blocks. Never hand-write expected output. The
 provided commands and outputs must be reproducible.
+
+## IMPORTANT: each chapter README must be a SUPERSET of the book chapter
+
+A chapter's `README.md` must **contain everything the book's corresponding
+chapter says** — never less. It is a superset: extra explanation, the
+compile/run/check mechanics, and clarifications are welcome and encouraged, but
+**nothing from the original may be dropped.**
+
+When writing or reviewing a chapter, do a **superset audit** against the book:
+
+1. Read the chapter's full line range in `../chisel-book.tex` (see the mapping
+   table above), plus the referenced code snippets (the `//- start NAME` blocks
+   in `../src/**`).
+2. Walk the book **section by section** and confirm each of these made it into
+   the README (add whatever is missing):
+   - every **section/subsection** and its explanatory prose (motivating
+     examples, use cases, forward/back references like "see Section X");
+   - every **code snippet** (`\shortlist{...}`), including small illustrative
+     ones (e.g. the intro `for` loop) — tag non-project code `*illustrative*`;
+   - every **figure** (`\includegraphics`) and **table** (reproduce tables as
+     Markdown; render figures per the Figures section);
+   - domain **notes and caveats** (e.g. "optimized away by synthesis", "not a
+     hardware counter", "needs state to be fair"), and the **exercise**.
+3. Only *then* layer on the tutorial extras (build/run/check, expected output).
+
+Whenever you touch a chapter, re-run this audit; a README that silently omits
+book content is a bug to fix, not a stylistic choice.
 
 ## Version note baked into the docs
 

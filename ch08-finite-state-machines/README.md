@@ -3,9 +3,16 @@
 A finite-state machine (FSM) is the workhorse of control logic: a set of
 **states**, guarded **transitions** between them, and an **output** computed
 from the state. Every FSM is three pieces — a **state register**, **next-state
-logic**, and **output logic**. This chapter builds a Moore FSM (an alarm), then
-contrasts **Moore** vs. **Mealy** machines using a rising-edge detector done
-both ways.
+logic**, and **output logic**. FSMs are also called synchronous sequential
+circuits, and have an initial state set on reset.
+
+In principle, *any* digital circuit with registers or other memory can be
+described as one single FSM. In practice this isn't useful — try to describe
+your laptop as a single FSM. The next chapter shows how to build larger
+systems out of smaller FSMs by combining them into **communicating** FSMs.
+
+This chapter builds a Moore FSM (an alarm), then contrasts **Moore** vs.
+**Mealy** machines using a rising-edge detector done both ways.
 
 *Conventions: every file path is relative to
 `tutorial/ch08-finite-state-machines/`, and every command is run from that
@@ -60,9 +67,18 @@ clear is "don't care" when a bad event occurs):
 | red | – | 0 | red | 1 |
 | red | 0 | 1 | green | 1 |
 
+At this point we could spend some effort choosing an optimal **state
+encoding** — two common options are **binary** and **one-hot** — but we leave
+that low-level optimization to the synthesis tool and aim for readable code
+instead. In the current version of Chisel, `ChiselEnum` represents states in
+**binary** encoding; if a different encoding is wanted (e.g. one-hot), define
+Chisel constants for the state names instead of using `ChiselEnum`.
+
 In Chisel, states are symbolic names via **`ChiselEnum`**, the state is a
 `RegInit`, next-state logic is a `switch` over the state with input-guarded
-`when`s, and the output is a plain expression on the state:
+`when`s, and the output is a plain expression on the state. The FSM's inputs
+and output use the Chisel type `Bool`, and using `switch`/`is` requires
+`import chisel3.util._`:
 
 `src/main/scala/SimpleFsm.scala`
 ```scala
@@ -180,6 +196,17 @@ The difference is observable and is exactly what the tests assert:
 - **Moore** (`RisingMooreFsm`): `risingEdge` rises **one cycle later** and is
   exactly one clock wide.
 
+Laid out as a waveform, the two outputs look distinctly different: the Mealy
+`risingEdge` follows the rising edge of `din` immediately, combinationally, so
+its pulse is *less than one clock period wide*; the Moore `risingEdge` only
+rises on the *next* clock tick after `din` goes high, but its pulse is then
+*exactly one clock period wide*.
+
+***Figure 8.7** — Mealy and Moore waveforms for the rising-edge detector: the
+Mealy output tracks the input edge immediately (a narrow, less-than-a-clock
+pulse), while the Moore output lags one cycle behind but is a clean,
+full-width pulse.*
+
 **Which to use?** Mealy reacts faster and uses less state, but its
 input-to-output combinational path can chain into long paths — or, if
 communicating FSMs form a loop, a combinational loop (a design error). Moore
@@ -234,6 +261,8 @@ Write a **traffic-light controller** FSM (with a test bench). Ensure a safe
 all-red/orange phase when switching directions. For extra interest, add a
 priority road and car detectors on the minor road: switch the minor road green
 only when a car is detected, then return to the priority road.
+
+*This is a classic FSM exercise; see Dally, §14.3, for a worked example.*
 
 Back to the **[tutorial index](../README.md)**.
 Previous: **[Chapter 7 — Input Processing](../ch07-input-processing/README.md)**.

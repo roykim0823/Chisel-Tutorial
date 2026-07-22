@@ -60,6 +60,21 @@ val nextReg = RegNext(d)     // define + connect in one step
 val bothReg = RegNext(d, 0.U) // ... with a reset value
 ```
 
+A register can also be defined and connected in two steps **without** an
+initial value — plain `Reg`, not `RegInit`:
+
+```scala
+val delayReg = Reg(UInt(4.W))
+delayReg := delayIn
+```
+*illustrative*
+
+First the register is declared and named (the `Reg` in the name is a common
+convention that flags it as state, not a combinational wire); second, the
+signal is connected with a normal assignment. Without an initializer its value
+is **undefined** until the first write — use `RegInit` whenever a known reset
+value matters.
+
 `RegInit` gives a **synchronous reset**: conceptually a multiplexer selects the
 init value when `reset` is high.
 
@@ -68,6 +83,20 @@ init value when `reset` is high.
 </p>
 
 ***Figure 6.2** — Synchronous reset adds a mux on the input (init value vs. data).*
+
+Chisel also supports **asynchronous reset**, but synchronous is the default
+(and what every example in this book/tutorial uses). For a synchronous reset
+no change is needed to the flip-flop itself — conceptually it's just the input
+mux above. In practice, though, modern FPGA flip-flops have a dedicated
+synchronous reset (and set) input built into the flip-flop itself, so a
+reset register costs **no extra LUTs**; the mux in Figure 6.2 is a schematic
+simplification, not real gate cost.
+
+**Cycle by cycle** (the book's `reg_wave` waveform): before any reset the
+register's content is undefined. Once `reset` goes high, the register takes
+the init value `0` on that rising edge and ignores the data input. From the
+next cycle on, `reset` stays low and the output simply follows the input with
+a one-cycle delay.
 
 A very common pattern is a register with an **enable**: capture the input only
 when `enable` is high, otherwise hold. It's a mux that feeds the output back:
@@ -78,7 +107,56 @@ when `enable` is high, otherwise hold. It's a mux that feeds the output back:
 
 ***Figure 6.3** — A register with enable: when `enable` is low the output feeds
 back, so the value is held.* Chisel spells this `RegEnable(d, enable)` (or a
-`when(enable){ reg := d }`).
+`when(enable){ reg := d }`), described here in full:
+
+```scala
+val enableReg = Reg(UInt(4.W))
+when (enable) {
+  enableReg := inVal
+}
+```
+*illustrative*
+
+Because this pattern is so common, Chisel provides `RegEnable`, whose second
+parameter is the enable signal — `val enableReg2 = RegEnable(inVal, enable)` —
+equivalent to the `when` above. A register with an enable can also be reset,
+combining `RegInit` with the same `when`:
+
+```scala
+val resetEnableReg = RegInit(0.U(4.W))
+when (enable) {
+  resetEnableReg := inVal
+}
+```
+*illustrative*
+
+The same reset-and-enable behavior is available in one line with the
+**three-parameter** form of `RegEnable` — input, init value, enable:
+
+```scala
+val resetEnableReg2 = RegEnable(inVal, 0.U(4.W), enable)
+```
+*illustrative*
+
+Just like synchronous reset, an enable is built into modern FPGA flip-flops,
+so an enabled register also costs no extra LUTs.
+
+**Cycle by cycle** (the book's `reg_en_wave` waveform): most of the time
+`enable` is high and the register follows the input with the usual one-cycle
+delay. In one cycle `enable` drops low; on the *next* cycle the register
+**holds** its previous value instead of capturing whatever the input is doing.
+
+A register can also be used **anonymously**, inline in an expression, with no
+name of its own. The following circuit detects a **rising edge** by comparing
+a signal's current value with its value one cycle ago:
+
+```scala
+val risingEdge = din & !RegNext(din)
+```
+*illustrative*
+
+`risingEdge` is `true` for exactly one cycle: the first cycle in which `din`
+reads high right after having been low.
 
 ---
 
@@ -131,6 +209,27 @@ val count99 = genCounter(99)
 
 > **Off-by-one:** to count *10* cycles, set `N = 9`. The counter takes values
 > `0..N` inclusive.
+
+The multiplexer form (`MuxCounter`) is the same behavior as the `when` form,
+just expressed with `Mux` instead:
+
+`src/main/scala/Counter.scala`
+```scala
+val cntReg = RegInit(0.U(8.W))
+cntReg := Mux(cntReg === N, 0.U, cntReg + 1.U)
+```
+
+And a `DownCounter` counts the other direction — reset to the maximum value
+and reload once it reaches 0:
+
+`src/main/scala/Counter.scala`
+```scala
+val cntReg = RegInit(N)
+cntReg := cntReg - 1.U
+when(cntReg === 0.U) {
+  cntReg := N
+}
+```
 
 **The "nerd" counter** — a micro-optimization: count from `N-2` down to `-1` so
 detecting the end only checks the **sign bit**, not a full comparator:
@@ -215,9 +314,41 @@ def pwm(nrCycles: Int, din: UInt) = {
 val dout = pwm(10, 3.U)   // high for 3 of every 10 cycles (tested below)
 ```
 
+Chisel also provides `signedBitLength(n)`, the equivalent sizing helper for a
+**signed** representation of `n`.
+
 The module also *modulates* the duty cycle up and down with a second pair of
-registers to fade an LED (`src/main/scala/Pwm.scala`, the `modulationReg` /
-`upReg` block).
+registers to fade an LED — a triangular wave that counts up to `FREQ` (100 MHz,
+so 0.5 Hz) and back down, then divides by 1024 (a cheap `>> 10` instead of a
+real divide) to bring it into the PWM's own range:
+
+`src/main/scala/Pwm.scala`
+```scala
+val FREQ = 100000000 // a 100 MHz clock input
+val MAX = FREQ / 1000 // 1 kHz
+
+val modulationReg = RegInit(0.U(32.W))
+val upReg = RegInit(true.B)
+
+when (modulationReg < FREQ.U && upReg) {
+  modulationReg := modulationReg + 1.U
+} .elsewhen (modulationReg === FREQ.U && upReg) {
+  upReg := false.B
+} .elsewhen (modulationReg > 0.U && !upReg) {
+  modulationReg := modulationReg - 1.U
+} .otherwise { // 0
+  upReg := true.B
+}
+
+// Divide the modulation by 1024 (~ the 1 kHz PWM range) with a right shift.
+val sig = pwm(MAX, modulationReg >> 10)
+```
+
+`modulationReg`/`upReg` form the triangle-wave counter (up while `upReg`,
+switching direction at the top and bottom); `sig` is that triangle fed into
+the same `pwm` function used for `dout` above, so it drives an LED through a
+continuously changing duty cycle. Real hardware division is expensive, so the
+`>> 10` shift (division by $2^{10} = 1024$) stands in for `/ 1000`.
 
 ---
 
@@ -330,6 +461,22 @@ val mem = SyncReadMem(1024, UInt(8.W), SyncReadMem.WriteFirst)
 > `loadMemoryFromFile`. That needs a resource file, so it's left out of this
 > runnable project; see the book's `memory_init` example.
 
+Memory init files are plain ASCII text, one line per entry: traditionally
+`.bin` files (one character per bit) drive Verilog's `readmemb`, and `.hex`
+files (one character per 4 bits) drive `readmemh`. `loadMemoryFromFile` emits
+a **separate Verilog file** with the corresponding `readmemb`/`readmemh` call
+— and, unlike the inline variant, that form works from ChiselTest.
+
+Chisel also provides plain `Mem`, a memory with a synchronous write but an
+**asynchronous** read (the read data appears combinationally, the same cycle
+the address is applied — no address register). Most FPGAs don't have this
+kind of memory block natively, so the synthesis tool builds it out of
+flip-flops, which gets expensive fast. **Prefer `SyncReadMem`** for this
+reason. If you really need async-read behavior and your FPGA has the
+resources for it (e.g. as LUT RAM on Xilinx parts), implement it by hand as a
+`BlackBox` — vendors typically ship ready-to-use code templates for exactly
+this.
+
 ---
 
 ## 6.7 Build, run, and check
@@ -377,10 +524,51 @@ writes `Registers.sv`, `WhenCounter.sv`, `Timer.sv`, `Pwm.sv`,
    every ~500 ms and use it as the enable of a 4-bit counter (as you'd drive a
    7-segment display).
 2. **Modulated PWM.** Drive an LED with the modulated PWM in `Pwm.scala`; pick
-   the PWM frequency and the modulation frequency.
+   the PWM frequency and the modulation frequency. Instead of the triangular
+   wave, try generating a **sine** shape: build a lookup table with a few lines
+   of Scala (generated at elaboration time, the way §5's combinational-logic
+   generators do) and index it with the counter instead of comparing directly.
 3. **Memory + FSMs (advanced).** Instantiate a `SyncReadMem` and two state
    machines: one writes a string, the other reads it back (remember the one-cycle
    read latency). Test with `printf`.
+4. **Sketch the schematic.** Translating between a schematic and Chisel code
+   fluently is a core skill. Sketch the block diagram for each circuit below
+   (both are illustrative, not project files):
+
+   ```scala
+   val dout = WireDefault(0.U)
+
+   switch(sel) {
+     is(0.U) { dout := 0.U }
+     is(1.U) { dout := 11.U }
+     is(2.U) { dout := 22.U }
+     is(3.U) { dout := 33.U }
+     is(4.U) { dout := 44.U }
+     is(5.U) { dout := 55.U }
+   }
+   ```
+   *illustrative*
+
+   and, a slightly more complex circuit containing a register:
+
+   ```scala
+   val regAcc = RegInit(0.U(8.W))
+
+   switch(sel) {
+     is(0.U) { regAcc := regAcc }
+     is(1.U) { regAcc := 0.U }
+     is(2.U) { regAcc := regAcc + din }
+     is(3.U) { regAcc := regAcc - din }
+   }
+   ```
+   *illustrative*
+
+5. **Serial memory download (advanced).** Assume a serial port (Chapter 7)
+   connects your FPGA board to a laptop. Design a protocol and a state machine
+   that downloads the content of a memory over that serial link *after* the
+   FPGA has been configured — so a program can be loaded (or changed) without
+   re-synthesizing. What states does the state machine need, and how does it
+   know when the download is complete?
 
 Back to the **[tutorial index](../README.md)**.
 Previous: **[Chapter 5 — Combinational Building Blocks](../ch05-combinational-building-blocks/README.md)**.
