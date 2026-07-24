@@ -276,6 +276,12 @@ Click a chapter to open its walkthrough.
 | [`ch14-design-of-a-processor/`](ch14-design-of-a-processor/README.md) | The Leros accumulator processor: ISA, an ALU with accumulator (tested vs. a Scala model), instruction decoder, and data memory; the FSMD datapath explained. |
 | [`ch15-a-risc-v-pipeline/`](ch15-a-risc-v-pipeline/README.md) | The Wildcat 3-stage pipelined RISC-V (RV32I): datapath as functions (ALU, decoder, register file), instruction ROM and CSRs, with the full `ThreeCats` CPU generated to Verilog. |
 
+> **New to Scala?** Chisel is a Scala library, so the code is Scala. See
+> [`SCALA-NOTES.md`](SCALA-NOTES.md) for a compact reference to every Scala
+> language feature and idiom the chapters use — with real examples from the
+> tutorial. Read it once up front, then dip back in whenever a chapter uses
+> syntax you don't recognize.
+
 
 ---
 
