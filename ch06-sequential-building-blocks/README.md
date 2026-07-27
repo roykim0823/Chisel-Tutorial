@@ -256,58 +256,31 @@ val count99 = genCounter(99)
 > **Off-by-one:** to count *10* cycles, set `N = 9`. The counter takes values
 > `0..N` inclusive.
 
-> **Scala note — the generic test method.** The shared bench in
-> `src/test/scala/CounterTest.scala` is written once and reused for every
-> variant. Its signature uses a Scala *generic* (a *type parameter*):
->
-> ```scala
-> def testFn[T <: Counter](c: T, n: Int) = { ... }
-> ```
-> *illustrative*
->
-> - **`T`** is a **type parameter** — a placeholder for a type, declared in the
->   square brackets `[ ]` just as `c` and `n` are value parameters declared in
->   `( )`. It gets filled in per call: passing a `WhenCounter` makes `T =
->   WhenCounter`, passing a `MuxCounter` makes `T = MuxCounter`. The compiler
->   **infers** it from the argument, so you never write it out.
-> - **`<:`** means **"is a subtype of"** — an *upper bound*. `T <: Counter`
->   reads *"`T` may be any type, as long as it extends `Counter`."* Since
->   `WhenCounter`, `MuxCounter`, `DownCounter`, `FunctionCounter`, and
->   `NerdCounter` all `extends Counter`, they are all valid choices for `T`;
->   something unrelated like `String` is rejected at compile time.
-> - The bound is also what lets the body call `c.io.tick` / `c.io.cnt` /
->   `c.clock`: because `T` is guaranteed to be a `Counter`, the compiler knows
->   those members exist. Without the bound `T` could be *anything* and `c.io`
->   wouldn't compile.
->
-> One method definition, type-checked once, drives all six counters —
-> `[T <: Counter](c: T, n: Int)` simply means *"works for any counter type `T`,
-> taking that counter `c` and an `Int n`."*
+The six counter variants share **one** test, written as a reusable `trait` and
+mixed into the test class with `with`:
 
-> **Scala note — the `=>` arrow and the `test { c => ... }` block.** Each test
-> case passes a *function literal* (a lambda) to ChiselTest's `test`:
->
-> ```scala
-> test(new WhenCounter(4)) { c => testFn(c, 4) }
-> ```
-> *illustrative*
->
-> - **`=>`** is the **anonymous-function arrow**: it separates a function's
->   parameter(s) on the left from its body on the right — `param => body`, read
->   *"given `param`, do `body`."* So `{ c => testFn(c, 4) }` is a one-argument
->   function whose body runs the shared bench on `c`.
-> - **`c`** is that parameter — the **running** DUT (device under test).
->   `test(new WhenCounter(4))` elaborates the module into a simulator, then calls
->   *your* function, **loaning** you the ready-to-poke instance as `c`; when the
->   block returns, `test` tears the simulation down. (This is why you can't just
->   write `testFn(new WhenCounter(4), 4)` — the raw `new` isn't a live
->   simulation until `test` wraps it.)
->
-> Don't confuse `=>` with the neighbouring arrows: **`<-`** in
-> `for (_ <- 0 until n * 3)` is the for-comprehension *generator* ("drawn
-> from"), and **`<:`** is the subtype bound from the note above. The `=>` arrow
-> also shows up in `match` cases (`case 0 => ...`) — same idea: left of the
-> arrow is the input, right of it is the result.
+`src/test/scala/CounterTest.scala`
+```scala
+trait CountTest {
+  def testFn[T <: Counter](c: T, n: Int) = { ... }   // the shared bench
+}
+
+class CounterTest extends AnyFlatSpec with ChiselScalatestTester with CountTest {
+  "WhenCounter 4" should "count" in { test(new WhenCounter(4)) { c => testFn(c, 4) } }
+  // ... one `should "count"` line per counter variant
+}
+```
+
+*Scala note — the shared bench is a `trait` mixed in with `with`
+([§A.4](../SCALA-NOTES.md#a4-trait--mixed-in-with-with)), and its
+`def testFn[T <: Counter]` is a type parameter with an upper bound
+([§D.1](../SCALA-NOTES.md#d1-type-parameters-t-with-an-upper-bound-t--x)).*
+
+*Scala note — each `test(new WhenCounter(4)) { c => testFn(c, 4) }` passes a
+function literal using the `=>` arrow
+([§E.1](../SCALA-NOTES.md#e1-function-literals-lambdas-and-the--arrow)) that closes
+over the test's `var count`
+([§E.2](../SCALA-NOTES.md#e2-closures-over-test-state)).*
 
 The multiplexer form (`MuxCounter`) is the same behavior as the `when` form,
 just expressed with `Mux` instead:

@@ -78,6 +78,8 @@ val name = city._2
 ```
 *illustrative*
 
+*Scala note — Scala tuples → [§G.2](../SCALA-NOTES.md#g2-tuples).*
+
 Tuples are useful for returning more than one value from a function — see
 §10.2 below.
 
@@ -106,6 +108,8 @@ def adder(x: UInt, y: UInt) = {
 }
 ```
 *illustrative*
+
+*Scala note — a `def` method → [§C.4](../SCALA-NOTES.md#c4-def-methods), and a block's value is its last expression → [§C.5](../SCALA-NOTES.md#c5-block-as-expression-implicit-return).*
 
 Calling it twice creates two independent adder instances — no add operation
 runs at elaboration time, the calls just build hardware:
@@ -183,6 +187,8 @@ val text = VecInit(msg.map(_.U))   // a String is a Seq[Char] -> a byte ROM
 val squareROM = VecInit(0.U, 1.U, 4.U, 9.U, 16.U, 25.U)
 val square = squareROM(n)
 ```
+
+*Scala note — `map`/`reduce`/`zip`/`zipWithIndex` → [§F.3](../SCALA-NOTES.md#f3-map--foreach--reduce--zip--zipwithindex), and a `String` as a `Seq[Char]` → [§F.4](../SCALA-NOTES.md#f4-string-as-a-seqchar).*
 
 The classic example is **binary → BCD** conversion. In VHDL you'd generate this
 table with an external script; in Chisel a Scala loop builds it inline:
@@ -322,6 +328,8 @@ case class SaveConf(txDepth: Int, rxDepth: Int, width: Int) {
   assert(txDepth > 0 && rxDepth > 0 && width > 0, "parameters must be larger than 0")
 }
 ```
+
+*Scala note — `case class` → [§B.2](../SCALA-NOTES.md#b2-case-class); Scala's `assert` → [§J.3](../SCALA-NOTES.md#j3-assert-scala).*
 
 An object of the case class is created by calling the constructor; fields are
 immutable and read by name:
@@ -536,6 +544,8 @@ class DownTicker(n: Int) extends Ticker(n) { /* count down */ }
 class NerdTicker(n: Int) extends Ticker(n) { /* count to -1 */ }
 ```
 
+*Scala note — an `abstract class` with constructor parameters → [§A.5](../SCALA-NOTES.md#a5-abstract-class-with-constructor-parameters).*
+
 The tester takes `[T <: Ticker]`, so it accepts any implementation:
 
 `src/test/scala/TickerTest.scala`
@@ -611,6 +621,8 @@ collapses to one line:
 val sum = vec.reduce(_ + _)
 ```
 *illustrative*
+
+*Scala note — higher-order functions → [§E.4](../SCALA-NOTES.md#e4-higher-order-functions) and the `_` placeholder (point-free) → [§E.3](../SCALA-NOTES.md#e3-the-_-placeholder-point-free-style).*
 
 `reduce` builds a *chain* of adders. For a sum, a chain isn't ideal — a
 *tree* has a shorter combinational delay. **`reduceTree`** builds that

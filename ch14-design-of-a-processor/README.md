@@ -182,6 +182,8 @@ object Constants {
 }
 ```
 
+*Scala note — `object` as namespace / companion → [§A.7](../SCALA-NOTES.md#a7-object-as-a-namespace--companion-object).*
+
 ---
 
 ## 14.2 The datapath
@@ -265,6 +267,8 @@ def alu(a: Int, b: Int, op: Int): Int = {
 }
 ```
 
+*Scala note — `match`/`case` → [§G.4](../SCALA-NOTES.md#g4-match--case--wildcard-case-_).*
+
 While this duplication of hardware written in Chisel and an implementation in
 Scala does not detect errors that are already in the shared specification, it
 is at least a strong sanity check. We use some corner-case values as the test
@@ -295,6 +299,8 @@ test(interesting)
 val randArgs = Seq.fill(10)(scala.util.Random.nextInt())
 test(randArgs)
 ```
+
+*Scala note — conversions (`.toList`/`.toInt`/`.toLong`) → [§F.5](../SCALA-NOTES.md#f5-conversions-tolist-toindexedseq-toint-tolong); multi-generator `for` → [§H.3](../SCALA-NOTES.md#h3-multi-generator-for).*
 
 Exhaustive testing of a 32-bit ALU is not possible (there are far too many
 input combinations), which is why we picked corner cases as input values;

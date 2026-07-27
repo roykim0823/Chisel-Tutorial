@@ -101,6 +101,8 @@ switch (stateReg) {
 io.ringBell := stateReg === red   // Moore: output depends only on state
 ```
 
+*Scala note — nested `object … extends ChiselEnum` → [§B.1](../SCALA-NOTES.md#b1-enumerations-via-a-nested-object-chiselenum).*
+
 > Unlike Verilog/VHDL, you don't need a separate `nextState` wire: a Chisel
 > register is a normal value you can assign inside the `switch`.
 

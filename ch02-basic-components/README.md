@@ -98,6 +98,8 @@ the bit width — can be left out for Chisel to infer. That is why a Chisel
 description is often more concise and readable than the equivalent VHDL or
 Verilog. (Even so, spelling out widths at creation is good practice; see §2.8.)
 
+*Scala note — `new` & type inference → [§C.3](../SCALA-NOTES.md#c3-new-and-type-inference).*
+
 Non-decimal constants use a string prefixed by `h` (hex), `o` (octal), or `b`
 (binary); underscores group digits and are ignored:
 
@@ -115,6 +117,8 @@ Characters (ASCII) can be constants too, and `Bool` has `true.B` / `false.B`:
 val aChar = 'A'.U   // 65
 Bool(); true.B; false.B
 ```
+
+*Scala note — literals (char `'A'`, hex/binary strings, no octal, `L` suffix) → [§J.2](../SCALA-NOTES.md#j2-literals).*
 
 All of the constructs above live together in `src/main/scala/Logic.scala` —
 open it and match each line to the notes here.
@@ -180,7 +184,9 @@ divide/modulo → width of the numerator.
 > the hardware tree is built as the Scala operators execute, so it follows
 > **Scala's** precedence — which is *similar but not identical* to Java/C (and
 > different again from VHDL, where all logic operators share one precedence and
-> evaluate left-to-right). When in doubt, **use parentheses.**
+> evaluate left-to-right). When in doubt, **use parentheses.** See
+> [Scala Notes §J.1](../SCALA-NOTES.md#j1-infix-method--operator-notation--precedence) —
+> Chisel's operators are ordinary Scala method calls used infix.
 
 | Function | Description | Types |
 |----------|-------------|-------|
@@ -485,6 +491,8 @@ class RegisterFile(debug: Boolean) extends Module {
   }
 }
 ```
+
+*Scala note — `if` as an expression → [§C.2](../SCALA-NOTES.md#c2-if-as-an-expression); `Seq`/`List`/`Array` builders → [§F.1](../SCALA-NOTES.md#f1-seq--list--array--indexedseq-and-builders); `Option`/`Some`/`None` → [§G.1](../SCALA-NOTES.md#g1-option--some--none--get).*
 
 Read this carefully — it packs several ideas:
 

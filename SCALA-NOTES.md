@@ -24,7 +24,7 @@ uses syntax you don't recognize.
 `if`, `for`, `val`, or `map` is a *build-time* instruction ("emit this wire,
 repeat this connection 32 times"). The hardware equivalents are the Chisel
 constructs (`when`, `Mux`, `Vec`, `Reg`). Keeping this distinction straight is
-the single biggest hurdle for newcomers — see [§H](#h-scala-vs-chisel-the-elaboration-vs-hardware-line).
+the single biggest hurdle for newcomers — see [§I](#i-scala-vs-chisel-the-elaboration-vs-hardware-line).
 
 Where a chapter README already has a "Scala note" callout, this file points to
 it rather than repeating it.
@@ -33,24 +33,27 @@ it rather than repeating it.
 
 ## Contents
 
-- [A. Program structure & declarations](#a-program-structure--declarations)
-- [B. Values, variables & methods](#b-values-variables--methods)
-- [C. Types & generics](#c-types--generics)
-- [D. Functions & functional programming](#d-functions--functional-programming)
-- [E. Collections](#e-collections)
-- [F. Pattern matching, tuples & Option](#f-pattern-matching-tuples--option)
-- [G. Control flow](#g-control-flow)
-- [H. Scala vs. Chisel: the elaboration-vs-hardware line](#h-scala-vs-chisel-the-elaboration-vs-hardware-line)
-- [I. Operators, literals & runtime idioms](#i-operators-literals--runtime-idioms)
-- [J. ScalaTest DSL (reads like English, is really Scala)](#j-scalatest-dsl-reads-like-english-is-really-scala)
-- [K. What the tutorial does *not* use](#k-what-the-tutorial-does-not-use)
+- [A. Top-level structure: packages, classes, objects, traits](#a-top-level-structure-packages-classes-objects-traits)
+- [B. Data & enumeration types](#b-data--enumeration-types)
+- [C. Values, variables & methods](#c-values-variables--methods)
+- [D. Types & generics](#d-types--generics)
+- [E. Functions & functional programming](#e-functions--functional-programming)
+- [F. Collections](#f-collections)
+- [G. Pattern matching, tuples & Option](#g-pattern-matching-tuples--option)
+- [H. Control flow](#h-control-flow)
+- [I. Scala vs. Chisel: the elaboration-vs-hardware line](#i-scala-vs-chisel-the-elaboration-vs-hardware-line)
+- [J. Operators, literals & runtime idioms](#j-operators-literals--runtime-idioms)
+- [K. ScalaTest DSL (reads like English, is really Scala)](#k-scalatest-dsl-reads-like-english-is-really-scala)
+- [L. What the tutorial does *not* use](#l-what-the-tutorial-does-not-use)
 - [Where the chapters already explain Scala](#where-the-chapters-already-explain-scala)
 
 ---
 
-## A. Program structure & declarations
+## A. Top-level structure: packages, classes, objects, traits
 
-**`object X extends App`** *(ch01)* — a program entry point. Scala classes have
+### A.1 `object X extends App`
+
+*(ch01)* — a program entry point. Scala classes have
 **no** static members; an `object` is Scala's replacement for Java-style
 statics — a lazily-created singleton (exactly one instance, no `new`). When an
 `object` shares its name with a class in the same file it is that class's
@@ -69,7 +72,9 @@ object HelloScala extends App {
 }
 ```
 
-**`class` / `extends`** *(ch01)* — a class is a blueprint for objects; you
+### A.2 `class` / `extends`
+
+*(ch01)* — a class is a blueprint for objects; you
 instantiate it with `new`, and inside it you place *members*: fields (declared
 with `val`/`var`) that hold each instance's state, and methods (declared with
 `def`) that operate on that state. Every instance gets its own copy of the
@@ -87,7 +92,9 @@ class Hello extends Module {
 }
 ```
 
-**`package` and `import`** *(ch03)* — a `package` clause at the top of a file
+### A.3 `package` and `import`
+
+*(ch03)* — a `package` clause at the top of a file
 places its code under a namespace (mirroring the folder tree) and signals to the
 compiler that code in the same package is related, so names don't collide across
 a large design. `import` then lets you refer to package or object members by
@@ -106,7 +113,9 @@ import mypack._        // wildcard: everything in the package
 val x = new mypack.Abc()
 ```
 
-**`trait` … mixed in with `with`** *(ch06)* — a trait is Scala's fundamental
+### A.4 `trait` … mixed in with `with`
+
+*(ch06)* — a trait is Scala's fundamental
 unit of code reuse: it encapsulates method and field definitions that you *mix
 into* classes with `with`, and it also defines a type. Unlike the single
 inheritance of classes, a class may mix in **any number** of traits, which is
@@ -125,7 +134,9 @@ trait CountTest {
 class CounterTest extends AnyFlatSpec with ChiselScalatestTester with CountTest
 ```
 
-**`abstract class` with constructor parameters** *(ch10)* — a class that has an
+### A.5 `abstract class` with constructor parameters
+
+*(ch10)* — a class that has an
 abstract member (e.g. a method with no body) must itself be declared `abstract`
 and cannot be instantiated directly; subclasses supply the missing members. Its
 constructor parameters go in parentheses after the name. A related shorthand,
@@ -141,7 +152,93 @@ modules must implement (e.g. every "ticker" has the same I/O).
 abstract class Ticker(n: Int) extends Module { ... }
 ```
 
-**`case class`** *(ch10)* — a lightweight, immutable data holder. The `case`
+### A.6 `private` members
+
+*(ch11)* — placing `private` in front of a field, method,
+or nested class makes it accessible only inside the body of the class or object
+that defines it, enforcing encapsulation so callers depend only on the intended
+interface. Scala's `private` is stricter and more consistent than Java's: it
+applies even to inner classes, so an *enclosing* class cannot reach a member
+declared private in a class nested inside it.
+
+`ch11-example-designs/src/main/scala/fifo/fifo.scala`
+
+```scala
+private class Buffer() extends Module { ... }
+class FifoIO[T <: Data](private val gen: T) extends Bundle { ... }
+```
+
+### A.7 `object` as a namespace / companion object
+
+*(ch14)* — because an `object` is
+a singleton with no statics elsewhere in the language, it's the natural home for
+constants and stateless helper `def`s. When it shares a name with a class it is
+that class's **companion** — a place for factory methods and a `default` value,
+with mutual access to each other's private members. Importing its members
+(`import Constants._`) then lets you use the names bare.
+
+`ch14-design-of-a-processor/src/main/scala/leros/shared/shared.scala`
+
+```scala
+object Constants {
+  val NOP = 0x00
+  // ...
+}
+```
+
+---
+
+## B. Data & enumeration types
+
+Where [§A](#a-top-level-structure-packages-classes-objects-traits) covers the
+*containers* that organize a program, this section covers declarations whose job
+is to model **values** — a bundle of typed fields, or a finite set of named
+constants.
+
+### B.1 Enumerations via a nested `object` (`ChiselEnum`)
+
+*(ch08)* — an enumeration
+is a type restricted to a **finite set of named values**. You first meet one in
+the finite-state-machine chapter, where each FSM declares its states as a nested
+`object State extends ChiselEnum` **inside** the Module. Two Scala ideas combine
+here:
+
+- *Nesting / scoping* — a declaration may be nested inside a class, object, or
+  even a method, scoping it to its encloser. Putting `object State` inside the
+  Module keeps the state names local to that module; they don't leak out.
+- *`object` = singleton* — an enumeration is conceptually **one** type with
+  **one** fixed set of constants, so it wants exactly one instance, which is
+  precisely what an `object` is (no `new`, no duplicates). `import State._` then
+  pulls `green`/`orange`/`red` into bare scope.
+
+(`ChiselEnum` itself is a *Chisel library* trait, not a Scala keyword: it turns
+the nested `object` into symbolic, binary-encoded hardware state constants — the
+Chisel counterpart to Scala 2's own library `Enumeration`, covered at the end of
+this section.)
+
+`ch08-finite-state-machines/src/main/scala/SimpleFsm.scala`
+
+```scala
+object State extends ChiselEnum {   // declared *inside* the Module
+  val green, orange, red = Value
+}
+import State._                      // then refer to `green`, `orange`, `red` bare
+```
+
+> **Why `object`, not `class`?** `class State extends ChiselEnum` *does* compile —
+> but then you must instantiate it (`val s = new State; import s._`), and nothing
+> stops you creating several independent instances whose values have formally
+> different, path-dependent types (`s1.Type` ≠ `s2.Type`). An enumeration is a
+> **single shared type** — inherently a singleton — so `object`, Scala's built-in
+> singleton with no `new`, is the exact fit. It's the same "Scala classes have no
+> statics; an `object` replaces them" point from
+> [§A](#a-top-level-structure-packages-classes-objects-traits): the state
+> constants are the shared, static-like values that belong on one singleton, and
+> being a singleton is what lets `import State._` bring them into scope bare.
+
+### B.2 `case class`
+
+*(ch10)* — a lightweight, immutable data holder. The `case`
 modifier tells the compiler to generate a bundle of boilerplate: a companion
 object with a factory `apply` (so you construct instances *without* `new`),
 accessor methods for each constructor parameter (which become read-only fields),
@@ -158,60 +255,17 @@ case class Config(txDepth: Int, rxDepth: Int, width: Int)
 // used as:  val param = Config(4, 2, 16)   // no `new`
 ```
 
-**Nested class / nested object** *(ch11)* — declarations can be *nested* inside a
-class, object, or even a method, scoping them to their encloser so helpers stay
-private to where they're used. A standalone `object` (one with no companion
-class) is also the natural place to group related utilities. Scala even lets you
-reuse a name in a nested inner scope, shadowing the outer one. The tutorial's
-FSMs declare their state enumeration as a nested `object` inside the Module, so
-the states belong to that module and don't leak out.
+### B.3 Scala's `Enumeration` + `type` alias
 
-`ch11-example-designs/src/main/scala/BubbleFifo.scala`
-
-```scala
-object State extends ChiselEnum {   // declared *inside* the Module
-  val empty, full = Value
-}
-```
-
-**`private` members** *(ch11)* — placing `private` in front of a field, method,
-or nested class makes it accessible only inside the body of the class or object
-that defines it, enforcing encapsulation so callers depend only on the intended
-interface. Scala's `private` is stricter and more consistent than Java's: it
-applies even to inner classes, so an *enclosing* class cannot reach a member
-declared private in a class nested inside it.
-
-`ch11-example-designs/src/main/scala/fifo/fifo.scala`
-
-```scala
-private class Buffer() extends Module { ... }
-class FifoIO[T <: Data](private val gen: T) extends Bundle { ... }
-```
-
-**`object` as a namespace / companion object** *(ch14)* — because an `object` is
-a singleton with no statics elsewhere in the language, it's the natural home for
-constants and stateless helper `def`s. When it shares a name with a class it is
-that class's **companion** — a place for factory methods and a `default` value,
-with mutual access to each other's private members. Importing its members
-(`import Constants._`) then lets you use the names bare.
-
-`ch14-design-of-a-processor/src/main/scala/leros/shared/shared.scala`
-
-```scala
-object Constants {
-  val NOP = 0x00
-  // ...
-}
-```
-
-**Scala's `Enumeration` + `type` alias** *(ch15)* — an enumeration is a type
-restricted to a **finite set of named values**. Scala 2's library `Enumeration`
-(distinct from Chisel's `ChiselEnum`) creates these by assigning `Value`; each
-one carries an ordinal `.id` starting at 0 in declaration order, which you can
-use as an `Int`. A `type` member, declared with the `type` keyword, names a
-type: a concrete one (`type InstrType = Value`) is an alias that clarifies a
-verbose type, while an abstract one is left for subclasses to define. The RISC-V
-chapter uses this for instruction-format tags used purely at generation time.
+*(ch15)* — Scala's *standard library*
+offers its own enumeration, distinct from Chisel's `ChiselEnum` above: you extend
+the library class `Enumeration` (again as an `object`, for the same singleton
+reason) and assign `Value`. Each value carries an ordinal `.id` starting at 0 in
+declaration order, which you can use as an `Int`. A `type` member, declared with
+the `type` keyword, names a type: a concrete one (`type InstrType = Value`) is an
+alias that clarifies a verbose type, while an abstract one is left for subclasses
+to define. The RISC-V chapter uses this for instruction-format tags used purely
+at generation time.
 
 `ch15-a-risc-v-pipeline/src/main/scala/wildcat/defines.scala`
 
@@ -224,9 +278,11 @@ object InstrType extends Enumeration {
 
 ---
 
-## B. Values, variables & methods
+## C. Values, variables & methods
 
-**`val` vs `var`** *(ch01 / ch06)* — Scala has two kinds of variable. A `val`,
+### C.1 `val` vs `var`
+
+*(ch01 / ch06)* — Scala has two kinds of variable. A `val`,
 once initialized, can **never** be reassigned (like a Java `final`); a `var` can
 be reassigned throughout its life and supports `+=`/`-=`. Scala style prefers
 `val`, and in *hardware-description* code everything is a `val` — a `val` *names
@@ -244,14 +300,16 @@ var count = -1
 count -= 1
 ```
 
-**`if` as an expression** *(ch02)* — in Scala `if`/`else` *is an expression*: it
+### C.2 `if` as an expression
+
+*(ch02)* — in Scala `if`/`else` *is an expression*: it
 tests a condition and evaluates to the value of whichever branch runs, so it can
 sit on the right-hand side of `=` (there's no ternary `?:` because `if` already
 does that job). Initializing a `val` directly from an `if` — rather than
 declaring a `var` and mutating it — is the functional idiom and signals to
 readers that the value never changes. Here it decides, **at elaboration time**,
 whether an optional debug port exists at all. Contrast Chisel's `when`, which
-builds a runtime mux — see [§H](#h-scala-vs-chisel-the-elaboration-vs-hardware-line).
+builds a runtime mux — see [§I](#i-scala-vs-chisel-the-elaboration-vs-hardware-line).
 
 `ch02-basic-components/src/main/scala/RegisterFile.scala`
 
@@ -259,7 +317,9 @@ builds a runtime mux — see [§H](#h-scala-vs-chisel-the-elaboration-vs-hardwar
 val dbgPort = if (debug) Some(Output(Vec(32, UInt(32.W)))) else None
 ```
 
-**`new` and type inference** *(ch02 / ch03)* — `new` instantiates a class
+### C.3 `new` and type inference
+
+*(ch02 / ch03)* — `new` instantiates a class
 (`new mypack.Abc()`); `case class`es and factory objects let you skip it. Scala
 also *infers* the type of most `val`s from the right-hand side. Its inference is
 **flow-based**: for a call `m(args)`, if the method `m`'s type is already known,
@@ -274,7 +334,9 @@ have to flow the other way. (The ch02 README calls type inference out too.)
 val x = new mypack.Abc()   // type Abc inferred; no `: Abc` needed
 ```
 
-**`def` methods** *(ch10)* — a `def` starts with the name, a parenthesized
+### C.4 `def` methods
+
+*(ch10)* — a `def` starts with the name, a parenthesized
 parameter list where **every parameter must carry an explicit type** (the
 compiler does *not* infer parameter types), an optional result type after a
 colon, then `=` and the body. The `=` reflects the functional view that a method
@@ -295,7 +357,9 @@ def counter(depth: Int, incr: Bool): (UInt, UInt) = { ... }
 def testOne(a: Int, b: Int, fun: Int): Unit = { ... }
 ```
 
-**Block-as-expression (implicit return)** *(ch10)* — a `{ … }` block *is* an
+### C.5 Block-as-expression (implicit return)
+
+*(ch10)* — a `{ … }` block *is* an
 expression: it evaluates to its **last expression**. Idiomatic Scala has no
 `return` keyword — a method's result is simply the value its body ends with. Here
 the generator builds a wire, conditionally drives it, and yields it as the
@@ -311,7 +375,9 @@ def myMux[T <: Data](sel: Bool, tPath: T, fPath: T): T = {
 }
 ```
 
-**Named arguments** *(ch11)* — at a call site you may pass arguments by writing
+### C.6 Named arguments
+
+*(ch11)* — at a call site you may pass arguments by writing
 each parameter's name and `=` before its value, which lets you supply them in a
 different order than declared (any positional arguments must come first). This
 makes calls with several same-typed parameters self-documenting —
@@ -323,7 +389,9 @@ makes calls with several same-typed parameters self-documenting —
 test(new UartLoopback(frequency = 1000, baudRate = 10))
 ```
 
-**Default arguments** *(ch12)* — a definition can give a parameter a fallback
+### C.7 Default arguments
+
+*(ch12)* — a definition can give a parameter a fallback
 value, so callers who omit that argument get the default. Common for "usually 1"
 step counts and "off by default" feature flags, and frequently combined with
 named arguments to set just the one you care about.
@@ -340,7 +408,9 @@ def step(n: Int = 1) = dut.clock.step(n)   // step() means step(1)
 class MemMappedRV[T <: Data](gen: T, block: Boolean = false) extends Module
 ```
 
-**Nested (local) functions & closures** *(ch12)* — a `def` defined inside another
+### C.8 Nested (local) functions & closures
+
+*(ch12)* — a `def` defined inside another
 `def` or block is a *local function*, visible only there; it lets you factor code
 into small helpers without polluting the namespace or exposing them to clients. A
 **closure** is the function value formed from a literal that references *free*
@@ -359,16 +429,28 @@ def write(addr: Int, data: Int) = { ... dut.io ... }
 
 ---
 
-## C. Types & generics
+## D. Types & generics
 
-**Type parameters `[T]` with an upper bound `[T <: X]`** *(ch06)* — a *generic*
-is a placeholder type filled in per use, written in square brackets just as value
-parameters are written in parentheses (and any value arguments then follow in
-parentheses — the type argument is part of the type, the value isn't). `<:` is an
-**upper bound**: `[T <: Data]` means "any `T`, as long as it is a subtype of
-`Data`." The bound is exactly what lets the body call `T`'s members — without it
-the compiler knows nothing about `T`, so, e.g., requiring `[T <: Ordered[T]]`
-would let you compare elements. This is the mechanism behind *type-generic*
+### D.1 Type parameters `[T]` with an upper bound `[T <: X]`
+
+*(ch06)* — a *generic* (type parameter) is a placeholder for a **type**, written
+in square brackets `[ ]` just as value parameters are written in parentheses
+`( )` — and any value arguments then follow in parentheses, because the type
+argument is part of the type while the value isn't. It is **filled in per call**,
+and the compiler *infers* it from the arguments, so you never write it out:
+calling `testFn(new WhenCounter(4), …)` makes `T = WhenCounter`, and passing a
+`MuxCounter` makes `T = MuxCounter`.
+
+`<:` is an **upper bound** — "is a subtype of". `[T <: Counter]` reads *"`T` may
+be any type, as long as it extends `Counter`."* So `WhenCounter`, `MuxCounter`,
+`DownCounter`, `FunctionCounter`, and `NerdCounter` (which all `extends Counter`)
+are valid choices for `T`, while something unrelated like `String` is rejected at
+**compile time**. The bound is also exactly what lets the body call `T`'s
+members: because `T` is guaranteed to be a `Counter`, the compiler knows
+`c.io.tick` / `c.io.cnt` / `c.clock` exist — without the bound `T` could be
+anything and `c.io` wouldn't compile (requiring `[T <: Ordered[T]]`, say, would
+instead let you compare elements). One method definition, type-checked once,
+drives all six counter variants — this is the mechanism behind *type-generic*
 hardware: a FIFO or mux that works for **any** payload type, checked once at
 compile time.
 
@@ -384,10 +466,9 @@ def testFn[T <: Counter](c: T, n: Int) = { ... }
 class BubbleFifo[T <: Data](gen: T, depth: Int) extends Fifo(gen, depth) { ... }
 ```
 
-> The **ch06 README (~line 259)** has a full "Scala note" walking through
-> `[T <: Counter]`, upper bounds, and inference.
+### D.2 Wildcard type argument `[_ <: Data]`
 
-**Wildcard type argument `[_ <: Data]`** *(ch11)* — when you don't care *which*
+*(ch11)* — when you don't care *which*
 subtype fills a type parameter, `_` is an anonymous placeholder: `Fifo[_ <: Data]`
 means "a `Fifo` of *some* `Data` subtype." Handy for a test that accepts any
 FIFO regardless of payload.
@@ -398,24 +479,41 @@ FIFO regardless of payload.
 def testFn[T <: Fifo[_ <: Data]](dut: T) = { ... }
 ```
 
-**`type` alias** *(ch15)* — `type Name = Existing` introduces a synonym for an
+### D.3 `type` alias
+
+*(ch15)* — `type Name = Existing` introduces a synonym for an
 existing type, to abbreviate a verbose type or clarify intent. (See the
-`type InstrType = Value` example in [§A](#a-program-structure--declarations).)
+`type InstrType = Value` example in [§B.3](#b3-scalas-enumeration--type-alias).)
 
 ---
 
-## D. Functions & functional programming
+## E. Functions & functional programming
 
-**Function literals (lambdas) and the `=>` arrow** *(ch06)* — Scala has
-*first-class functions*: you write a function as an unnamed literal
-(`(x: Int) => x + 1`) and pass it around as a value. Worth distinguishing: the
-literal is source-code *text*, while the function *value* it produces at run time
-is an object you can store and invoke — the same class-vs-object distinction, one
-level up. This is *the* most common Scala shape in the tutorial, because every
-ChiselTest bench is `test(new Dut) { dut => ... }`: a function that `test` calls
-with the elaborated, running DUT loaned in as `dut`. Short forms let you drop
-inferable parameter types and the parentheses around a single parameter (the
+### E.1 Function literals (lambdas) and the `=>` arrow
+
+*(ch06)* — Scala has *first-class functions*: you write a function as an unnamed
+literal (`(x: Int) => x + 1`) and pass it around as a value. The **`=>`** is the
+anonymous-function arrow — it separates the parameter(s) on the left from the
+body on the right (`param => body`, read *"given `param`, do `body`"*). Worth
+distinguishing: the literal is source-code *text*, while the function *value* it
+produces at run time is an object you can store and invoke — the same
+class-vs-object distinction, one level up.
+
+This is *the* most common Scala shape in the tutorial, because every ChiselTest
+bench is `test(new Dut) { dut => ... }`: `test` elaborates the module into a
+simulator, then calls *your* function, **loaning** you the ready-to-poke running
+instance as `dut`; when the block returns, `test` tears the simulation down.
+(This is why you can't just write `testFn(new WhenCounter(4), 4)` directly — a
+raw `new` isn't a live simulation until `test` wraps it.) Short forms let you
+drop inferable parameter types and the parentheses around a single parameter (the
 expected type "targets" the inference).
+
+Don't confuse `=>` with the neighbouring arrows: **`<-`** in
+`for (_ <- 0 until n)` is the for-comprehension *generator* ("drawn from"), and
+**`<:`** is the [subtype bound](#d1-type-parameters-t-with-an-upper-bound-t--x)
+from the entry above. The `=>` arrow also shows up in `match` cases
+(`case 0 => ...`) — same idea: left of the arrow is the input, right of it is the
+result.
 
 `ch06-sequential-building-blocks/src/test/scala/CounterTest.scala`
 
@@ -431,17 +529,17 @@ Two-parameter literal (used to fold a Chisel `Vec`):
 vec.reduceTree((x, y) => Mux(x < y, x, y))
 ```
 
-> The **ch06 README (~line 287)** has a "Scala note" on `=>`, and carefully
-> distinguishes it from `<-` (for-comprehension generator) and `<:` (subtype
-> bound) — three arrows that look alike and mean different things.
+### E.2 Closures over test state
 
-**Closures over test state** *(ch06)* — the function you hand to `test` closes
+*(ch06)* — the function you hand to `test` closes
 over `val`s and `var`s declared just outside it, so the body can read the DUT and
-update expected-value bookkeeping (the `var count` from [§B](#b-values-variables--methods))
+update expected-value bookkeeping (the `var count` from [§C.1](#c1-val-vs-var))
 across cycles. Because closures capture the variable, not a copy, each iteration
 sees the updated count.
 
-**The `_` placeholder (point-free style)** *(ch10)* — inside a function literal,
+### E.3 The `_` placeholder (point-free style)
+
+*(ch10)* — inside a function literal,
 each `_` stands for a successive parameter, filled in at each invocation. So
 `_ + _` is shorthand for `(x, y) => x + y`, `_ > 0` for `x => x > 0`, and `_.U`
 for `x => x.U`. It works only when each parameter appears **exactly once** in the
@@ -462,7 +560,9 @@ val text = VecInit(msg.map(_.U))   // each Char -> a Chisel UInt literal
 > The **ch10 README (§10.6, ~lines 584–607)** explains function-literal syntax
 > and the `_` wildcard in prose.
 
-**Higher-order functions** *(ch10)* — a function that takes (or returns) another
+### E.4 Higher-order functions
+
+*(ch10)* — a function that takes (or returns) another
 function. Because the *varying* part of an algorithm can be passed in as a
 function value, higher-order functions let you factor out common structure and
 eliminate duplicated code — the book's example unifies several nearly identical
@@ -481,12 +581,14 @@ val sum = vec.reduce(add)      // pass the function `add` itself
 
 ---
 
-## E. Collections
+## F. Collections
 
 Scala collections drive *generation*: you build a Scala `Seq`/`List` at
 elaboration time and turn it into hardware with `VecInit`, `for`, `map`, etc.
 
-**`Seq` / `List` / `Array` / `IndexedSeq` and builders** *(ch02)* — *sequence*
+### F.1 `Seq` / `List` / `Array` / `IndexedSeq` and builders
+
+*(ch02)* — *sequence*
 types hold data lined up in order, so you can ask for elements by position. The
 default `List` is an immutable linked list: fast to add/remove at the front and
 great for pattern matching, but *not* fast for arbitrary-index access. You most
@@ -509,7 +611,9 @@ val regfile = RegInit(VecInit(Seq.fill(32)(0.U(32.W))))
 val buffers = Array.fill(depth) { Module(new FifoRegister(size)) }
 ```
 
-**Ranges: `until` (exclusive) vs `to` (inclusive)** *(ch03 / ch05)* — a `Range`
+### F.2 Ranges: `until` (exclusive) vs `to` (inclusive)
+
+*(ch03 / ch05)* — a `Range`
 is a collection of evenly-spaced integers, written `1 to 5` (inclusive) or
 `1 until 5` (excluding the upper bound). It's what almost every `for` header
 iterates over. The exclusive/inclusive choice is a frequent off-by-one source —
@@ -522,7 +626,9 @@ range, because it's shorter and sidesteps the off-by-one entirely.
 for (i <- 1 until n) { ... }
 ```
 
-**`map` / `foreach` / `reduce` / `zip` / `zipWithIndex`** *(ch10)* — the
+### F.3 `map` / `foreach` / `reduce` / `zip` / `zipWithIndex`
+
+*(ch10)* — the
 functional toolkit shared by Scala collections *and* Chisel `Vec`s. Where
 imperative code mutates data in place, the functional style *transforms an
 immutable collection into a new one*, and `map` is central: it applies a function
@@ -538,7 +644,9 @@ element with its position. (A `for`-`yield` comprehension compiles down to a
 Seq(3, 2, 0, 9, 1).zipWithIndex.foreach { case (v, i) => dut.io.in(i).poke(v.U) }
 ```
 
-**String as a `Seq[Char]`** *(ch10)* — a `String` isn't literally a sequence, but
+### F.4 String as a `Seq[Char]`
+
+*(ch10)* — a `String` isn't literally a sequence, but
 an implicit conversion wraps it (as a `WrappedString`, a kind of `IndexedSeq`) so
 that all sequence operations work on its characters — `reverse`, `map`, `slice`,
 and so on. That's why you can `map` over `"Hello"` to turn each `Char` into a
@@ -552,7 +660,9 @@ val text = VecInit(msg.map(_.U))
 val len  = msg.length.U
 ```
 
-**Conversions (`.toList`, `.toIndexedSeq`, `.toInt`, `.toLong`)** *(ch14)* —
+### F.5 Conversions (`.toList`, `.toIndexedSeq`, `.toInt`, `.toLong`)
+
+*(ch14)* —
 collections offer a family of `toArray`/`toList`/`toSeq`/`toIndexedSeq`/`toSet`/
 `toMap` methods (and number types their own `toInt`/`toLong`) to move between
 representations — e.g. widening a signed `Int` into a `Long` and masking it before
@@ -567,9 +677,11 @@ usually copies every element, so it can be slow on large collections.
 
 ---
 
-## F. Pattern matching, tuples & Option
+## G. Pattern matching, tuples & Option
 
-**`Option` / `Some` / `None` / `.get`** *(ch02)* — Scala's null-free "maybe a
+### G.1 `Option` / `Some` / `None` / `.get`
+
+*(ch02)* — Scala's null-free "maybe a
 value." An `Option` is either `Some(x)` (present) or the `None` singleton
 (absent); many library operations (like `Map.get`) return one. The idiomatic way
 to take it apart is a pattern match (`case Some(s)` / `case None`); `.get`
@@ -586,7 +698,9 @@ val dbgPort = if (debug) Some(Output(Vec(32, UInt(32.W)))) else None
 if (debug) { io.dbgPort.get := regfile }
 ```
 
-**Tuples** *(ch10)* — a tuple combines a **fixed number** of items so you can pass
+### G.2 Tuples
+
+*(ch10)* — a tuple combines a **fixed number** of items so you can pass
 them around as a whole; unlike a list its elements may have **different types**,
 which makes it ideal for returning several values from a method without declaring
 a class. Build one with comma-separated values in parentheses, read parts with
@@ -602,7 +716,9 @@ def compare(a: UInt, b: UInt) = { ...; (equ, gt) }   // returns a 2-tuple
 val (equ, gt) = compare(io.a, io.b)                  // destructure it
 ```
 
-**Pattern-matching in a lambda** *(ch10)* — patterns are allowed well beyond a
+### G.3 Pattern-matching in a lambda
+
+*(ch10)* — patterns are allowed well beyond a
 standalone `match`. A sequence of `case` clauses in braces can be used anywhere a
 function literal is expected — it's essentially a literal with multiple entry
 points (formally a *partial function*, which throws if applied to an unmatched
@@ -615,7 +731,9 @@ binding the tuple's parts to names. Common right after `zipWithIndex`.
 Seq(3, 2, 0, 9, 1).zipWithIndex.foreach { case (v, i) => dut.io.in(i).poke(v.U) }
 ```
 
-**`match` / `case` / wildcard `case _`** *(ch14)* — a `match` selects among
+### G.4 `match` / `case` / wildcard `case _`
+
+*(ch14)* — a `match` selects among
 alternatives using patterns. It's like a `switch` but far more general: it
 **yields a value**, has **no fall-through** and needs no `break`, and matches on
 literals, types, and destructured shapes; `case _` is the catch-all. (Case
@@ -636,9 +754,11 @@ op match {
 
 ---
 
-## G. Control flow
+## H. Control flow
 
-**`for` over a range** *(ch03 / ch05)* — the workhorse loop. A generator
+### H.1 `for` over a range
+
+*(ch03 / ch05)* — the workhorse loop. A generator
 `x <- coll` binds a fresh `val` to each element of *any* collection in turn and
 runs the body; at elaboration it *unrolls*, emitting the body's hardware (or
 running the test action) once per iteration. Nested loops can be written with two
@@ -659,7 +779,9 @@ for (a <- 0 until 4) {
 for (i <- 1 until n) { ... }
 ```
 
-**`while` loop** *(ch11 / ch12)* — the classic pre-test loop: it re-runs its body
+### H.2 `while` loop
+
+*(ch11 / ch12)* — the classic pre-test loop: it re-runs its body
 as long as the condition holds. It's called a "loop" rather than an expression
 because it yields no useful value (its result type is `Unit`), and it's really
 only needed where mutable state (`var`s) is involved — the book suggests looking
@@ -674,7 +796,9 @@ current simulated value.
 while (!dut.io.ack.peekBoolean()) step()
 ```
 
-**Multi-generator `for`** *(ch14)* — several `<-` generators in one `for` header,
+### H.3 Multi-generator `for`
+
+*(ch14)* — several `<-` generators in one `for` header,
 separated by `;`, iterate as nested loops — here sweeping every ALU operation ×
 every operand pair to exhaustively test the ALU.
 
@@ -686,7 +810,7 @@ for (fun <- 0 to 7; a <- values; b <- values) testOne(a, b, fun)
 
 ---
 
-## H. Scala vs. Chisel: the elaboration-vs-hardware line
+## I. Scala vs. Chisel: the elaboration-vs-hardware line
 
 This is the concept that trips up every newcomer, so it gets its own section.
 Your Scala program **runs once** to *build* a circuit; the circuit then runs
@@ -723,9 +847,11 @@ of you.
 
 ---
 
-## I. Operators, literals & runtime idioms
+## J. Operators, literals & runtime idioms
 
-**Infix method / operator notation & precedence** *(ch02)* — operators aren't a
+### J.1 Infix method / operator notation & precedence
+
+*(ch02)* — operators aren't a
 special language feature in Scala; they're ordinary **method calls** in nicer
 syntax. `1 + 2` literally means `1.+(2)`, and *any* method taking a single
 argument can be written infix without a dot — so `a & b` is `a.&(b)`, and
@@ -743,7 +869,9 @@ val logic = (a & b) | c
 val word  = highByte ## lowByte
 ```
 
-**Literals** *(ch02)* — a literal writes a constant value directly in code; all of
+### J.2 Literals
+
+*(ch02)* — a literal writes a constant value directly in code; all of
 Scala's basic types have literal forms. A character literal is a Unicode
 character in single quotes (`'A'`), or `\u` followed by four hex digits, or an
 escape sequence. One gotcha: Scala has **no octal literals**, so an integer that
@@ -758,7 +886,9 @@ value/width.
 val aChar = 'A'.U    // char literal, then made a Chisel UInt
 ```
 
-**`assert` (Scala)** *(ch10)* — the predefined `assert` method (from `Predef`)
+### J.3 `assert` (Scala)
+
+*(ch10)* — the predefined `assert` method (from `Predef`)
 throws an `AssertionError` when its condition is false; a two-argument form
 `assert(cond, explanation)` attaches an explanatory value to the error. It's used
 here at *elaboration/test* time (distinct from Chisel's hardware `assert`, which
@@ -772,7 +902,9 @@ runtime data.
 assert(txDepth > 0 && rxDepth > 0 && width > 0, "parameters must be larger than 0")
 ```
 
-**`require`** *(ch11)* — a *precondition* is a constraint on the values passed into
+### J.4 `require`
+
+*(ch11)* — a *precondition* is a constraint on the values passed into
 a method or constructor: something the caller must satisfy. You enforce one with
 the `require` method (from `Predef`), which throws an `IllegalArgumentException`
 if its condition is false, **preventing construction** with invalid data. Placing
@@ -785,7 +917,9 @@ hardware is built, so the object is valid from the moment it exists.
 require(depth > 0, "Number of buffer elements needs to be larger than 0")
 ```
 
-**String interpolation `s"…"`** *(ch12)* — when an identifier sits immediately
+### J.5 String interpolation `s"…"`
+
+*(ch12)* — when an identifier sits immediately
 before a string literal's opening quote, Scala applies that *interpolator*. The
 `s` interpolator evaluates each `$`-prefixed expression (use braces `${…}` for
 anything beyond a bare identifier), calls `toString`, and splices in the result;
@@ -800,17 +934,19 @@ build a descriptive assertion message.
 assert(read(i * 4) < 10, s"counter $i just started")
 ```
 
-**`println` and the standard library** *(ch01, ch14)* — plain Scala output
+### J.6 `println` and the standard library
+
+*(ch01, ch14)* — plain Scala output
 (`println` in `HelloScala`) and ordinary stdlib utilities such as
 `scala.util.Random.nextInt()` for randomized test vectors are all available in
 generators and tests.
 
 ---
 
-## J. ScalaTest DSL (reads like English, is really Scala)
+## K. ScalaTest DSL (reads like English, is really Scala)
 
 The test files read like sentences, but every word is an ordinary Scala method
-call in infix position (see [§I](#i-operators-literals--runtime-idioms)). ScalaTest
+call in infix position (see [§J](#j-operators-literals--runtime-idioms)). ScalaTest
 is the most flexible of Scala's testing options; its central concept is the
 **suite** — a named collection of tests — and you shape *how* tests are written by
 mixing in style and matcher traits. The tutorial uses the "tests as
@@ -835,7 +971,7 @@ object Unnecessary extends Tag("Unnecessary")
 
 ---
 
-## K. What the tutorial does *not* use
+## L. What the tutorial does *not* use
 
 So this reference doesn't over-promise, these Scala features **do not appear** in
 the tutorial's own code (you may still meet them elsewhere), with a one-line
@@ -848,7 +984,7 @@ sketch of each:
   into `xs.map(f)`.
 - **user-defined *symbolic* operators / `unary_` methods** — every symbolic
   operator you see is a Chisel library method used infix (see
-  [§I](#i-operators-literals--runtime-idioms)); the tutorial never *defines* one.
+  [§J](#j-operators-literals--runtime-idioms)); the tutorial never *defines* one.
 - **`implicit` / `given` conversions and context parameters** — a function's
   behaviour often depends on contextual data; *context parameters* (Scala 3
   "givens", the older `implicit` in the Scala 2.13 the tutorial uses) let the

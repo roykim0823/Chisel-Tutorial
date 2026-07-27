@@ -76,7 +76,21 @@ io.deq <> buffers(depth - 1).io.deq
 It's simple and cheap, but has two limits: max throughput is **one word per two
 cycles** (each stage toggles empty/full), and latency is **`depth` cycles**
 (the bubble has to travel through). `BubbleFifoTest` also demonstrates
-ChiselTest's `fork`/`join` for concurrent producer/consumer threads.
+ChiselTest's `fork`/`join` for concurrent producer/consumer threads, stepping
+the clock in a `while` loop until each side is ready:
+
+`src/test/scala/BubbleFifoTest.scala`
+```scala
+val enq = fork {
+  while (dut.io.enq.full.peekBoolean()) dut.clock.step()   // block until space
+  dut.io.enq.din.poke(42.U); dut.io.enq.write.poke(true.B)
+  dut.clock.step(); dut.io.enq.write.poke(false.B)
+}
+while (dut.io.deq.empty.peekBoolean()) dut.clock.step()    // block until data
+dut.io.deq.dout.expect(42.U)
+```
+
+*Scala note — the `while` loop → [§H.2](../SCALA-NOTES.md#h2-while-loop).*
 
 ---
 
@@ -114,6 +128,8 @@ abstract class Fifo[T <: Data](gen: T, val depth: Int) extends Module {
 }
 ```
 
+*Scala note — `private` members → [§A.6](../SCALA-NOTES.md#a6-private-members); `require` → [§J.4](../SCALA-NOTES.md#j4-require).*
+
 Five implementations (all in `fifo.scala`), each a subclass of `Fifo`:
 
 | Class | Idea | Trade-off |
@@ -146,6 +162,8 @@ io.enq.ready := (stateReg === empty || stateReg === one)
 io.deq.valid := (stateReg === one   || stateReg === two)
 io.deq.bits  := dataReg
 ```
+
+*Scala note — the generic test's wildcard type argument `[_ <: Data]` → [§D.2](../SCALA-NOTES.md#d2-wildcard-type-argument-_--data).*
 
 **`RegFifo`** — the hardware version of a software **circular buffer**: two
 pointers (read and write) walk around a small register file
@@ -248,6 +266,20 @@ A single-byte **`Buffer`**, a **`BufferedTx`** (Tx + buffer), a **`Sender`**
 > listening (the test steps 200 cycles first); and (2) a full frame exceeds
 > ChiselTest's default 1000-cycle idle timeout, so the test calls
 > `dut.clock.setTimeout(0)`.
+
+`UartTest` constructs the loopback with **named arguments**, so the two
+same-typed `Int` parameters can't be swapped by mistake:
+
+`src/test/scala/uart/UartTest.scala`
+```scala
+test(new UartLoopback(frequency = 1000, baudRate = 10)) { dut =>
+  // ... transmit one byte ...
+  dut.io.in.bits.poke('A'.U); dut.io.in.valid.poke(true.B)
+  dut.io.out.bits.expect('A'.U)   // the same byte comes back out
+}
+```
+
+*Scala note — named arguments → [§C.6](../SCALA-NOTES.md#c6-named-arguments).*
 
 ---
 

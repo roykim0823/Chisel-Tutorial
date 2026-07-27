@@ -200,7 +200,25 @@ class CounterDevice extends Module {
 ```
 
 `CounterDeviceTest` wraps the protocol in `read()`/`write()` helpers that poll
-`ack` — a clean pattern for driving a pipelined interface from a test.
+`ack` — a clean pattern for driving a pipelined interface from a test:
+
+`src/test/scala/CounterDeviceTest.scala`
+```scala
+test(new CounterDevice()) { dut =>
+  def step(n: Int = 1) = dut.clock.step(n)      // default arg: step() == step(1)
+
+  def read(addr: Int) = {                       // nested helper, closes over dut
+    dut.io.address.poke(addr.U); dut.io.rd.poke(true.B)
+    step(); dut.io.rd.poke(false.B)
+    while (!dut.io.ack.peekBoolean()) step()     // wait for the delayed ack
+    dut.io.rdData.peekInt()
+  }
+
+  for (i <- 0 until 4) assert(read(i * 4) < 10, s"counter $i just started")
+}
+```
+
+*Scala note — default arguments → [§C.7](../SCALA-NOTES.md#c7-default-arguments), nested (local) functions & closures → [§C.8](../SCALA-NOTES.md#c8-nested-local-functions--closures); string interpolation `s"…"` → [§J.5](../SCALA-NOTES.md#j5-string-interpolation-s).*
 
 ---
 

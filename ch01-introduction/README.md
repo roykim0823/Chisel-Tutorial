@@ -107,6 +107,8 @@ object HelloScala extends App {
 }
 ```
 
+*Scala note — `object … extends App` → [§A.1](../SCALA-NOTES.md#a1-object-x-extends-app); `println` & standard library → [§J.6](../SCALA-NOTES.md#j6-println-and-the-standard-library).*
+
 - `object HelloScala` — a Scala singleton object. `extends App` makes its body
   runnable as a program (the body *is* the `main`).
 - `println(...)` — ordinary console printing.
@@ -168,6 +170,8 @@ class Hello extends Module {
   io.led := blkReg
 }
 ```
+
+*Scala note — `class` / `extends` → [§A.2](../SCALA-NOTES.md#a2-class--extends); `val` vs `var` → [§C.1](../SCALA-NOTES.md#c1-val-vs-var).*
 
 You are **not** expected to understand every detail yet — Chapter 2 unpacks
 `Module`, `IO`, `Reg`, and `when`. But here is the idea, line by line:

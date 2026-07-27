@@ -401,6 +401,8 @@ object AluType extends Enumeration {
 }
 ```
 
+*Scala note — Scala `Enumeration` → [§B.3](../SCALA-NOTES.md#b3-scalas-enumeration--type-alias); `type` alias → [§D.3](../SCALA-NOTES.md#d3-type-alias).*
+
 The branch target is the PC plus the branch immediate, or (for `jalr`) the ALU
 result; `compare()` is a small function implementing the branch condition:
 
