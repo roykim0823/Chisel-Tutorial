@@ -282,6 +282,33 @@ function literal using the `=>` arrow
 over the test's `var count`
 ([§E.2](../SCALA-NOTES.md#e2-closures-over-test-state)).*
 
+**Why `test` takes no block.** That line is not one call but **two**.
+`test(...)` returns a **`TestBuilder`** holding the module expression
+*unevaluated* — just the recipe for the DUT — and the braces are a separate call
+to that builder's `apply`:
+
+```scala
+test(new WhenCounter(4)) { c => testFn(c, 4) }
+// the same two calls, written out:
+test(new WhenCounter(4)).apply(c => testFn(c, 4))
+```
+*illustrative*
+
+The instance bound to `c` is elaborated in that **second** call, which is what
+leaves room to slot options in between — the shape you met in Chapter 3 for
+waveform dumping:
+
+```scala
+test(new DeviceUnderTest).withAnnotations(Seq(WriteVcdAnnotation)) { dut => ... }
+```
+*illustrative*
+
+*Scala note — calling an object as if it were a function is `apply` sugar:
+`obj(args)` means `obj.apply(args)`
+([§J.7](../SCALA-NOTES.md#j7-calling-an-object-objargs-is-objapplyargs)); the
+unevaluated `=> T` parameter that stores the recipe is a **by-name parameter**
+([§C.9](../SCALA-NOTES.md#c9-by-name-parameters--t)).*
+
 The multiplexer form (`MuxCounter`) is the same behavior as the `when` form,
 just expressed with `Mux` instead:
 

@@ -427,6 +427,35 @@ def read(addr: Int)            = { ... dut.io ... }
 def write(addr: Int, data: Int) = { ... dut.io ... }
 ```
 
+### C.9 By-name parameters (`=> T`)
+
+*(ch06)* — a parameter whose type starts with `=>` receives an **unevaluated**
+expression (the caller writes no explicit `() =>`), which is evaluated only when
+— and each time — the body actually uses it. It is the trick libraries use to
+make an ordinary method look like a built-in control structure, since the
+argument then behaves like a block you hand over rather than a value you compute
+first. Note the contrast with the ordinary parameters of
+[§C.4](#c4-def-methods), which are evaluated once, at the call.
+
+ChiselTest's `test` is the tutorial's example. Because `dutGen` is by-name, the
+`new WhenCounter(4)` you write at the call site does **not** run there; it is
+kept as a recipe and elaborated later, when the returned builder is applied
+([§J.7](#j7-calling-an-object-objargs-is-objapplyargs)). ScalaTest's `in { … }`
+([§K](#k-scalatest-dsl-reads-like-english-is-really-scala)) takes its test body
+the same way.
+
+(chiseltest library signature)
+
+```scala
+def test[T <: Module](dutGen: => T): TestBuilder[T]
+```
+*illustrative*
+
+The tutorial never *declares* a by-name parameter of its own — it only consumes
+the ones chiseltest and ScalaTest provide (see
+[§L](#l-what-the-tutorial-does-not-use)). The **ch06 README (~line 285)** walks
+through what this buys you.
+
 ---
 
 ## D. Types & generics
@@ -504,9 +533,13 @@ bench is `test(new Dut) { dut => ... }`: `test` elaborates the module into a
 simulator, then calls *your* function, **loaning** you the ready-to-poke running
 instance as `dut`; when the block returns, `test` tears the simulation down.
 (This is why you can't just write `testFn(new WhenCounter(4), 4)` directly — a
-raw `new` isn't a live simulation until `test` wraps it.) Short forms let you
-drop inferable parameter types and the parentheses around a single parameter (the
-expected type "targets" the inference).
+raw `new` isn't a live simulation until `test` wraps it.) Strictly speaking the
+block isn't passed to `test` at all: `test(...)` returns a builder object, and
+the braces are a *second* call, to that builder's `apply`
+([§J.7](#j7-calling-an-object-objargs-is-objapplyargs)) — which is where the
+module is actually elaborated. Short forms let you drop inferable parameter
+types and the parentheses around a single parameter (the expected type "targets"
+the inference).
 
 Don't confuse `=>` with the neighbouring arrows: **`<-`** in
 `for (_ <- 0 until n)` is the for-comprehension *generator* ("drawn from"), and
@@ -941,6 +974,35 @@ assert(read(i * 4) < 10, s"counter $i just started")
 `scala.util.Random.nextInt()` for randomized test vectors are all available in
 generators and tests.
 
+### J.7 Calling an object: `obj(args)` is `obj.apply(args)`
+
+*(ch06)* — Scala needs no special "callable" syntax: if a value's type defines a
+method named **`apply`**, you may write the value followed by parentheses and the
+compiler inserts the `.apply` for you. So `obj(args)` *is* `obj.apply(args)` —
+the same "it only looks like syntax, it's really a method call" idea as
+[§J.1](#j1-infix-method--operator-notation--precedence), applied to the object
+itself. Three places you have already used it without noticing:
+
+- **companion factories** — `Seq(1, 2, 3)` and `Config(4, 2, 16)` construct
+  without `new` because the companion object defines `apply`
+  ([§A.1](#a1-object-x-extends-app), [§B.2](#b2-case-class));
+- **indexing** — a Chisel `Vec` element `v(i)`, and a bit-select on a `UInt` such
+  as `hotIn(i)` in ch05's encoder, are `apply` calls rather than built-in array
+  syntax;
+- **the ChiselTest bench** — `test(dut) { … }` is *two* calls: `test(dut)`
+  returns a `TestBuilder`, and the braces then call that builder's `apply`.
+
+`ch06-sequential-building-blocks/src/test/scala/CounterTest.scala`
+
+```scala
+test(new WhenCounter(4)) { c => testFn(c, 4) }
+// == test(new WhenCounter(4)).apply(c => testFn(c, 4))
+```
+
+The **ch06 README (~line 285)** unpacks that two-step call, including why the
+module is built only in the second one (see also
+[§C.9](#c9-by-name-parameters--t)).
+
 ---
 
 ## K. ScalaTest DSL (reads like English, is really Scala)
@@ -953,8 +1015,8 @@ mixing in style and matcher traits. The tutorial uses the "tests as
 specifications" (BDD) style via `AnyFlatSpec`: you write near-English specifier
 clauses so that running the suite prints human-readable, spec-like output.
 Decoded: `"DUT" should "pass"` is a method chain on a `String`, `in { … }` takes
-the test body as a by-name block, `taggedAs (…)` attaches a tag, and
-`should be(42)` is the Matchers DSL.
+the test body as a by-name block ([§C.9](#c9-by-name-parameters--t)),
+`taggedAs (…)` attaches a tag, and `should be(42)` is the Matchers DSL.
 
 `ch03-build-and-testing/src/test/scala/testing.scala`
 
@@ -992,11 +1054,9 @@ sketch of each:
   turn a value of one type into another to heal a mismatch. Powerful but easy to
   abuse, so they're best kept behind libraries — which is exactly where the
   tutorial meets them: pulled in *indirectly* through Chisel and ChiselTest,
-  never declared in chapter code.
-- **by-name parameters (`=> T`)** — a parameter whose type starts with `=>`
-  receives an *unevaluated* expression (no explicit `() =>` needed) that is
-  evaluated only when the body actually uses it — the trick libraries use to make
-  a method look like a built-in control structure.
+  never declared in chapter code. **By-name parameters** are the same story —
+  every test bench *uses* one, but no chapter file declares one, so they get a
+  proper entry at [§C.9](#c9-by-name-parameters--t).
 
 One idiom that *is* everywhere and is worth naming: **anonymous class
 instantiation** — writing `new` before a trait/abstract-class name followed by a
@@ -1023,8 +1083,9 @@ consolidates and extends them; consult the originals for the long-form version:
 | `ch02-basic-components/README.md` (~96) | Type inference |
 | `ch02-basic-components/README.md` (~181) | Operator precedence |
 | `ch05-combinational-building-blocks/README.md` (~121) | Scala `if` vs Chisel `when` |
-| `ch06-sequential-building-blocks/README.md` (~259) | Type parameters & upper bounds `[T <: Counter]` |
-| `ch06-sequential-building-blocks/README.md` (~287) | The `=>` arrow, lambdas, and `=>` vs `<-` vs `<:` |
+| `ch06-sequential-building-blocks/README.md` (~274) | Type parameters & upper bounds `[T <: Counter]` |
+| `ch06-sequential-building-blocks/README.md` (~279) | The `=>` arrow, lambdas, and `=>` vs `<-` vs `<:` |
+| `ch06-sequential-building-blocks/README.md` (~285) | `test(…) { … }` as two calls: `apply` sugar and the by-name DUT recipe |
 | `ch10-hardware-generators/README.md` (~584–607) | Function literals, higher-order functions, `_` wildcard |
 
 ---
