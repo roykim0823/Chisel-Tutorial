@@ -254,13 +254,22 @@ output:
 
 `src/main/scala/EncDec.scala`
 ```scala
-val v = Wire(Vec(16, UInt(4.W)))
+val hotIn = io.largeEncIn          // the 16-bit one-hot input
+val v = Wire(Vec(16, UInt(4.W)))   // 16 columns, each a 4-bit index
 v(0) := 0.U
 for (i <- 1 until 16) {
   v(i) := Mux(hotIn(i), i.U, 0.U) | v(i - 1)
 }
 val encOut = v(15)
+io.largeEncOut := encOut
 ```
+
+**The `hotIn` alias.** `hotIn` is nothing but a readable local name for the
+input port `io.largeEncIn` (a `UInt(16.W)`); the valid bit indices are therefore
+`hotIn(0)` through `hotIn(15)` — there is no `hotIn(16)`. Applying an index to a
+`UInt` like this is a **bit-select**: `hotIn(i)` extracts bit `i` as a single
+`Bool`. That is exactly the truth table's question *"is input bit `i` set?"*,
+which is why it serves as the select signal of each multiplexer.
 
 Reading it element by element: `v(0)` is the default case (`0`), which is also
 the output value when the least-significant bit of `hotIn` is set. Elements
@@ -271,6 +280,36 @@ The loop ORs each element with the previous one (`... | v(i - 1)`), so `v(15)`
 carries the combined result. Combining many values with one function this way is
 called a **reduce** — here, an **OR reduction**. (This assumes a one-hot input,
 just like the switch-based encoder.)
+
+**Walking the loop.** The `| v(i - 1)` is what makes each line more than a bare
+multiplexer: it carries the running result forward. Tracing an input where only
+`hotIn(5)` is set:
+
+| `i` | `Mux(hotIn(i), i.U, 0.U)` | `v(i - 1)` | `v(i)` |
+|:---:|:-------------------------:|:----------:|:------:|
+| 0 | — (`v(0) := 0.U`) | — | 0 |
+| 1–4 | 0 | 0 | 0 |
+| **5** | **5** | 0 | **5** |
+| 6–15 | 0 | 5 | **5** |
+
+The `5` produced at `v(5)` rides the OR chain all the way to `v(15)`, so
+`encOut = v(15) = 5`. Drop the `| v(i - 1)` and `v(6)` would fall back to `0`
+and stay there, leaving `v(15) = 0` — that accumulating OR is precisely what
+collects the 16 columns into one result.
+
+**When `hotIn(0)` is set.** `v(0)` is fixed to `0.U` *outside* the loop, and the
+loop starts at `i = 1`. Bit 0 encodes to the value `0`, which is already `v(0)`'s
+default, so no multiplexer is needed for it — `hotIn(0)` is in fact **never read**
+anywhere in the code. If only bit 0 is set, every multiplexer for `i >= 1`
+produces `0`, so all columns stay `0` and `encOut = 0`, which is the right
+answer.
+
+> **Caveat: `0` is ambiguous.** An all-zero input also produces `encOut = 0`, so
+> the output alone cannot tell `...0001` from `...0000`. Under the "input is
+> one-hot" assumption that's fine (position 0 *is* 0), but if you need to know
+> whether any input was valid at all, add a separate valid signal such as
+> `hotIn.orR`. This is one reason the priority encoder of §5.5 puts an arbiter
+> in front.
 
 ---
 
