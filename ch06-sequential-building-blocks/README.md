@@ -234,8 +234,9 @@ To count **events** rather than every cycle, increment under a condition:
 ***Figure 6.5** — An event counter increments only when its condition holds.*
 
 The same "count to N and wrap" can be written with `when`, with a `Mux`, counting
-down, or produced by a **function** (a lightweight generator). All four extend a
-shared abstract `Counter`, so one test drives them all:
+down, or produced by a **function** (a lightweight generator). Those four — and
+the "nerd" counter further below — all extend a shared abstract `Counter`, so one
+test drives them all:
 
 `src/main/scala/Counter.scala`
 ```scala
@@ -256,7 +257,8 @@ val count99 = genCounter(99)
 > **Off-by-one:** to count *10* cycles, set `N = 9`. The counter takes values
 > `0..N` inclusive.
 
-The six counter variants share **one** test, written as a reusable `trait` and
+The five counter variants share **one** test — six test lines, because
+`WhenCounter` is checked at two periods — written as a reusable `trait` and
 mixed into the test class with `with`:
 
 `src/test/scala/CounterTest.scala`
@@ -267,7 +269,7 @@ trait CountTest {
 
 class CounterTest extends AnyFlatSpec with ChiselScalatestTester with CountTest {
   "WhenCounter 4" should "count" in { test(new WhenCounter(4)) { c => testFn(c, 4) } }
-  // ... one `should "count"` line per counter variant
+  // ... one `should "count"` line per test case
 }
 ```
 
@@ -281,6 +283,11 @@ function literal using the `=>` arrow
 ([§E.1](../SCALA-NOTES.md#e1-function-literals-lambdas-and-the--arrow)) that closes
 over the test's `var count`
 ([§E.2](../SCALA-NOTES.md#e2-closures-over-test-state)).*
+
+> **Line-by-line walkthrough:
+> [`reviews/CounterTest.md`](reviews/CounterTest.md)** — why `test(...)` takes
+> both parentheses *and* braces, when the module is actually elaborated, how the
+> DUT reaches `testFn`, and a cycle-by-cycle trace of the checking loop.
 
 The multiplexer form (`MuxCounter`) is the same behavior as the `when` form,
 just expressed with `Mux` instead:
