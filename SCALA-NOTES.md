@@ -943,31 +943,46 @@ generators and tests.
 
 ### J.7 `apply`: the one method name you may omit
 
-*(ch01 onwards)* — just as [§J.1](#j1-infix-method--operator-notation--precedence)
-shows that operators are ordinary method calls, **function-call syntax is one
-too**. When a *value* (as opposed to a method name) is followed by an argument
-list, the compiler rewrites `obj(arg)` into `obj.apply(arg)`. That single
-rewrite is the language's whole contribution — the method itself is ordinary
-code someone wrote.
+*(ch01 onwards)* — `apply` is a piece of syntactic sugar that lets an object be
+*called like a function*. When you follow a *value* (as opposed to a method
+name) with parentheses, `obj(args)`, the compiler translates it into
+`obj.apply(args)` behind the scenes: the parentheses are not built-in call
+syntax, they are a silent method invocation. `apply` is the single method name
+Scala lets you drop this way — every other method must still be named in full
+(`obj.foo(args)`).
 
-Three things follow, and together they explain a lot of code that otherwise
+**The reason the language has this rule is unification.** In Scala a function is
+itself an object: a value of type `A => B` is really an instance of the trait
+`Function1[A, B]`, whose one member is a method called `apply`
+([§E.1](#e1-function-literals-lambdas-and-the--arrow)). Without the sugar,
+calling a function would mean writing `f.apply(x)`. By rewriting `f(x)` into
+`f.apply(x)`, Scala lets a plain function value be invoked with ordinary call
+syntax — and because the same rewrite applies to *any* value, not just
+functions, an arbitrary object can opt into that syntax simply by defining an
+`apply` method. That is how libraries make their own constructs read like
+built-in language features. C++ programmers will recognize both the mechanism
+and the motive: this is exactly `operator()`, and an object that defines `apply`
+is a callable "functor".
+
+So this is the lesson of [§J.1](#j1-infix-method--operator-notation--precedence)
+from the other direction: there, operators turned out to be ordinary method
+calls; here, **function-call syntax is one too**. That single rewrite is the
+language's whole contribution — the method itself is ordinary code someone
+wrote.
+
+Two consequences follow, and together they explain a lot of code that otherwise
 looks like built-in syntax:
 
-- **Only the name `apply` may be dropped.** Every other method must be named in
-  full (`f.bar(3)`). Dropping the *dot* is the separate rule of §J.1 and works
-  for any single-argument method. Note the two are independent: `apply` loses
-  its name, an infix operator loses its dot.
+- **Dropping the *name* is not the same as dropping the *dot*.** The infix rule
+  of §J.1 lets any single-argument method lose its dot (`a add b`); the `apply`
+  rule lets one particular method lose its name. The two are independent —
+  `apply` loses its name, an infix operator loses its dot — and every other
+  method must still be written out in full (`f.bar(3)`).
 - **`apply` is not a keyword and implements no interface.** Any class or object
   may define one, with any signature, overloaded or curried; the compiler simply
   looks the name up. So `Mux.apply` and a `UInt`'s `apply` are unrelated methods
   that happen to share a name — which is why the same syntax means "build a
   multiplexer" in one place and "extract a bit" in another.
-- **The rule exists to unify calling.** A function type `A => B` is really the
-  trait `Function1[A, B]`, whose one member is `apply`, so calling a function
-  *is* an `apply` call ([§E.1](#e1-function-literals-lambdas-and-the--arrow)).
-  Making the rewrite universal means a function value and any other object are
-  invoked with identical syntax — which is how libraries make their APIs read
-  like language constructs.
 
 | Written | What it really is | Where `apply` is defined |
 |---|---|---|

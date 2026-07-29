@@ -9,8 +9,8 @@ file top to bottom and explains each of those.
 
 *Conventions: every file path is relative to
 `tutorial/ch06-sequential-building-blocks/`, and every command is run from that
-folder. A block labelled with a project path is verbatim from that file; an
-italic note underneath flags anything excerpted or annotated. Blocks labelled
+folder. A block labeled with a project path is verbatim from that file; an
+italic note underneath flags anything excerpted or annotated. Blocks labeled
 `chiseltest 6.0.0 · chiseltest/…` are verbatim **library** source at the stated
 lines (`…` marks an omission).*
 
