@@ -450,7 +450,7 @@ members: because `T` is guaranteed to be a `Counter`, the compiler knows
 `c.io.tick` / `c.io.cnt` / `c.clock` exist — without the bound `T` could be
 anything and `c.io` wouldn't compile (requiring `[T <: Ordered[T]]`, say, would
 instead let you compare elements). One method definition, type-checked once,
-drives all six counter variants — this is the mechanism behind *type-generic*
+drives all five counter variants — this is the mechanism behind *type-generic*
 hardware: a FIFO or mux that works for **any** payload type, checked once at
 compile time.
 
@@ -941,6 +941,63 @@ assert(read(i * 4) < 10, s"counter $i just started")
 `scala.util.Random.nextInt()` for randomized test vectors are all available in
 generators and tests.
 
+### J.7 `apply`: the one method name you may omit
+
+*(ch01 onwards)* — just as [§J.1](#j1-infix-method--operator-notation--precedence)
+shows that operators are ordinary method calls, **function-call syntax is one
+too**. When a *value* (as opposed to a method name) is followed by an argument
+list, the compiler rewrites `obj(arg)` into `obj.apply(arg)`. That single
+rewrite is the language's whole contribution — the method itself is ordinary
+code someone wrote.
+
+Three things follow, and together they explain a lot of code that otherwise
+looks like built-in syntax:
+
+- **Only the name `apply` may be dropped.** Every other method must be named in
+  full (`f.bar(3)`). Dropping the *dot* is the separate rule of §J.1 and works
+  for any single-argument method. Note the two are independent: `apply` loses
+  its name, an infix operator loses its dot.
+- **`apply` is not a keyword and implements no interface.** Any class or object
+  may define one, with any signature, overloaded or curried; the compiler simply
+  looks the name up. So `Mux.apply` and a `UInt`'s `apply` are unrelated methods
+  that happen to share a name — which is why the same syntax means "build a
+  multiplexer" in one place and "extract a bit" in another.
+- **The rule exists to unify calling.** A function type `A => B` is really the
+  trait `Function1[A, B]`, whose one member is `apply`, so calling a function
+  *is* an `apply` call ([§E.1](#e1-function-literals-lambdas-and-the--arrow)).
+  Making the rewrite universal means a function value and any other object are
+  invoked with identical syntax — which is how libraries make their APIs read
+  like language constructs.
+
+| Written | What it really is | Where `apply` is defined |
+|---|---|---|
+| `IO(new Bundle { … })` | `IO.apply(…)` | Chisel's `object IO` |
+| `Mux(cond, a, b)` / `RegInit(0.U)` | `Mux.apply(…)` / `RegInit.apply(…)` | Chisel companion objects |
+| `cntReg(7)` | `cntReg.apply(7)` | `Bits` — **extracts bit 7**, not an array index |
+| `Seq(1, 2, 3)` / `Config(4, 2, 16)` | companion `apply` | stdlib / `case class` ([§B.2](#b2-case-class), [§F.1](#f1-seq--list--array--indexedseq-and-builders)) |
+| `test(new Dut) { c => … }` | `.apply(lambda)` on the object `test` returned | chiseltest's `TestBuilder` |
+
+The bit-extraction case is the one most often misread, because it looks exactly
+like indexing a collection:
+
+`ch06-sequential-building-blocks/src/main/scala/Counter.scala`
+
+```scala
+  when(cntReg(7)) {   // sign bit set => reached -1
+```
+
+And the ChiselTest bench is the case where the omission makes a library call
+look like syntax — the braces are an argument to a second, separate call:
+
+`ch06-sequential-building-blocks/src/test/scala/CounterTest.scala`
+
+```scala
+test(new WhenCounter(4)) { c => testFn(c, 4) }
+```
+
+> The ch06 review page [*Anatomy of `CounterTest.scala`*](ch06-sequential-building-blocks/reviews/CounterTest.md)
+> walks that last line through both calls in detail.
+
 ---
 
 ## K. ScalaTest DSL (reads like English, is really Scala)
@@ -1023,8 +1080,8 @@ consolidates and extends them; consult the originals for the long-form version:
 | `ch02-basic-components/README.md` (~96) | Type inference |
 | `ch02-basic-components/README.md` (~181) | Operator precedence |
 | `ch05-combinational-building-blocks/README.md` (~121) | Scala `if` vs Chisel `when` |
-| `ch06-sequential-building-blocks/README.md` (~259) | Type parameters & upper bounds `[T <: Counter]` |
-| `ch06-sequential-building-blocks/README.md` (~287) | The `=>` arrow, lambdas, and `=>` vs `<-` vs `<:` |
+| `ch06-sequential-building-blocks/README.md` (~276) | Type parameters & upper bounds `[T <: Counter]` |
+| `ch06-sequential-building-blocks/README.md` (~281) | The `=>` arrow, lambdas, and `=>` vs `<-` vs `<:` |
 | `ch10-hardware-generators/README.md` (~584–607) | Function literals, higher-order functions, `_` wildcard |
 
 ---
