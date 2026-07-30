@@ -975,9 +975,8 @@ looks like built-in syntax:
 
 - **Dropping the *name* is not the same as dropping the *dot*.** The infix rule
   of §J.1 lets any single-argument method lose its dot (`a add b`); the `apply`
-  rule lets one particular method lose its name. The two are independent —
-  `apply` loses its name, an infix operator loses its dot — and every other
-  method must still be written out in full (`f.bar(3)`).
+  rule lets one particular method lose its name. The two are independent:
+  `apply` loses its name, an infix operator loses its dot.
 - **`apply` is not a keyword and implements no interface.** Any class or object
   may define one, with any signature, overloaded or curried; the compiler simply
   looks the name up. So `Mux.apply` and a `UInt`'s `apply` are unrelated methods
