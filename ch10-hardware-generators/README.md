@@ -24,7 +24,10 @@ ch10-hardware-generators/
 │   ├── ParamAdder.scala    width parameter + two instances
 │   ├── Config.scala         case classes for parameters (+ ConfigDemo)
 │   ├── ParamFunc.scala      a mux parameterized by a Chisel TYPE
+│   ├── PortDemo.scala       type-parameterized routers + why the Bundle param is private
+│   ├── RegisterFile.scala   optional debug port via Scala's Option
 │   ├── Ticker.scala         abstract base + three implementations (inheritance)
+│   ├── ArbiterTree.scala    reduceTree arbitration tree: fair and priority 2:1
 │   └── Generate.scala
 └── src/test/scala/  (one test per topic)
 ```
@@ -148,11 +151,11 @@ output wires in a Scala **tuple**:
 
 `src/main/scala/functional.scala`
 ```scala
-def compare(a: UInt, b: UInt) = {
-  val equ = a === b
-  val gt = a > b
-  (equ, gt)                       // return a tuple
-}
+  def compare(a: UInt, b: UInt) = {
+    val equ = a === b
+    val gt = a > b
+    (equ, gt)   // return a tuple
+  }
 ```
 
 The tuple returned by a call can be accessed with `._n`:
@@ -168,7 +171,7 @@ Or decomposed directly into named wires, as this chapter's project does:
 
 `src/main/scala/functional.scala`
 ```scala
-val (equ, gt) = compare(io.a, io.b) // decompose it
+  val (equ, gt) = compare(io.a, io.b)   // decompose the tuple
 ```
 
 Functions used across modules belong in a Scala `object` of utilities.
@@ -182,10 +185,15 @@ with **`VecInit`** and ordinary Scala:
 
 `src/main/scala/GenHardware.scala`
 ```scala
-val msg = "Hello World!"
-val text = VecInit(msg.map(_.U))   // a String is a Seq[Char] -> a byte ROM
-val squareROM = VecInit(0.U, 1.U, 4.U, 9.U, 16.U, 25.U)
-val square = squareROM(n)
+  // A Scala String is a Seq[Char]; map each char to a UInt -> a ROM of bytes.
+  val msg = "Hello World!"
+  val text = VecInit(msg.map(_.U))
+  val len = msg.length.U
+
+  // A small square-lookup ROM.
+  val n = io.squareIn
+  val squareROM = VecInit(0.U, 1.U, 4.U, 9.U, 16.U, 25.U)
+  val square = squareROM(n)
 ```
 
 *Scala note — `map`/`reduce`/`zip`/`zipWithIndex` → [§F.3](../SCALA-NOTES.md#f3-map--foreach--reduce--zip--zipwithindex), and a `String` as a `Seq[Char]` → [§F.4](../SCALA-NOTES.md#f4-string-as-a-seqchar).*
@@ -195,11 +203,14 @@ table with an external script; in Chisel a Scala loop builds it inline:
 
 `src/main/scala/BcdTable.scala`
 ```scala
-val table = Wire(Vec(100, UInt(8.W)))
-for (i <- 0 until 100) {
-  table(i) := (((i / 10) << 4) + i % 10).U  // tens nibble | ones nibble
-}
-io.data := table(io.address)
+  val table = Wire(Vec(100, UInt(8.W)))
+
+  // Convert binary i to BCD: tens digit in the upper nibble, ones in the lower.
+  for (i <- 0 until 100) {
+    table(i) := (((i / 10) << 4) + i % 10).U
+  }
+
+  io.data := table(io.address)
 ```
 
 > The same idea generates trig lookup tables, filter constants, or even a whole
@@ -308,13 +319,22 @@ val bundle3 = 0.U.asTypeOf(new MyBundle)
 ```scala
 class ParamAdder(n: Int) extends Module {
   val io = IO(new Bundle {
-    val a = Input(UInt(n.W)); val b = Input(UInt(n.W)); val c = Output(UInt(n.W))
+    val a = Input(UInt(n.W))
+    val b = Input(UInt(n.W))
+    val c = Output(UInt(n.W))
   })
+
   io.c := io.a + io.b
 }
-// ...
-val add8  = Module(new ParamAdder(8))
-val add16 = Module(new ParamAdder(16))
+```
+
+Two differently-sized adders then come from the same generator — inside
+`UseAdder`:
+
+`src/main/scala/ParamAdder.scala`
+```scala
+  val add8 = Module(new ParamAdder(8))
+  val add16 = Module(new ParamAdder(16))
 ```
 
 **Case class** — package many parameters into one lightweight, immutable value
@@ -323,7 +343,13 @@ val add16 = Module(new ParamAdder(16))
 `src/main/scala/Config.scala`
 ```scala
 case class Config(txDepth: Int, rxDepth: Int, width: Int)
+```
 
+A `case class` can also validate its parameters, so a bad configuration fails
+at elaboration instead of producing broken hardware:
+
+`src/main/scala/Config.scala`
+```scala
 case class SaveConf(txDepth: Int, rxDepth: Int, width: Int) {
   assert(txDepth > 0 && rxDepth > 0 && width > 0, "parameters must be larger than 0")
 }
@@ -336,9 +362,11 @@ immutable and read by name:
 
 `src/main/scala/Config.scala`
 ```scala
-val param = Config(4, 2, 16)
-
-println("The width is " + param.width)
+// Run with:  sbt "runMain ConfigDemo"
+object ConfigDemo extends App {
+  val param = Config(4, 2, 16)
+  println("The width is " + param.width)
+}
 ```
 
 **Type parameter** — parameterize by a Chisel *type*. `[T <: Data]` accepts any
@@ -347,14 +375,24 @@ Chisel's own `Mux` is generic):
 
 `src/main/scala/ParamFunc.scala`
 ```scala
-def myMux[T <: Data](sel: Bool, tPath: T, fPath: T): T = {
-  val ret = WireDefault(fPath)
-  when (sel) { ret := tPath }
-  ret
-}
+  // A multiplexer parameterized by a Chisel TYPE: [T <: Data] accepts any
+  // Chisel type (Data is the root of the type system). Same function works for
+  // a UInt or a whole Bundle.
+  def myMux[T <: Data](sel: Bool, tPath: T, fPath: T): T = {
+    val ret = WireDefault(fPath)
+    when (sel) {
+      ret := tPath
+    }
+    ret
+  }
+```
 
-val resA = myMux(io.selA, 5.U, 10.U)        // with a UInt
-val resB = myMux(io.selB, tVal, fVal)       // with a ComplexIO Bundle
+Calling it with a plain `UInt` needs nothing special:
+
+`src/main/scala/ParamFunc.scala`
+```scala
+  // Use with a simple UInt type.
+  val resA = myMux(io.selA, 5.U, 10.U)
 ```
 
 > **Caveat:** both mux paths must be of the *same* type `T`. Mixing types
@@ -365,8 +403,8 @@ val resB = myMux(io.selB, tVal, fVal)       // with a ComplexIO Bundle
 > ```
 > *illustrative*
 
-For the "complex" `resB` case above, `ComplexIO` is a two-field `Bundle`, and
-a `Bundle` *constant* is built by wiring up each field of a `Wire`:
+For the "complex" case, `ComplexIO` is a two-field `Bundle`, and a `Bundle`
+*constant* is built by wiring up each field of a `Wire`:
 
 `src/main/scala/ParamFunc.scala`
 ```scala
@@ -375,16 +413,17 @@ class ComplexIO extends Bundle {
   val b = Bool()
 }
 ```
-```scala
-val tVal = Wire(new ComplexIO)
-tVal.b := true.B
-tVal.d := 42.U
-val fVal = Wire(new ComplexIO)
-fVal.b := false.B
-fVal.d := 13.U
 
-// The multiplexer with a complex type
-val resB = myMux(selB, tVal, fVal)
+`src/main/scala/ParamFunc.scala`
+```scala
+  // Use with a complex Bundle type (build Bundle constants with a Wire).
+  val tVal = Wire(new ComplexIO)
+  tVal.b := true.B
+  tVal.d := 42.U
+  val fVal = Wire(new ComplexIO)
+  fVal.b := false.B
+  fVal.d := 13.U
+  val resB = myMux(io.selB, tVal, fVal)
 ```
 
 The first version of `myMux` used `WireDefault` to build a wire of type `T`
@@ -393,15 +432,15 @@ initial value, use `fPath.cloneType` to get the Chisel type instead:
 
 `src/main/scala/ParamFunc.scala`
 ```scala
-def myMuxAlt[T <: Data](sel: Bool, tPath: T, fPath: T): T = {
-
-  val ret = Wire(fPath.cloneType)
-  ret := fPath
-  when (sel) {
-    ret := tPath
+  // Alternative using fPath.cloneType when no default value is wanted.
+  def myMuxAlt[T <: Data](sel: Bool, tPath: T, fPath: T): T = {
+    val ret = Wire(fPath.cloneType)
+    ret := fPath
+    when (sel) {
+      ret := tPath
+    }
+    ret
   }
-  ret
-}
 ```
 
 ### Modules with Type Parameters
@@ -412,6 +451,7 @@ type parameter `T` to the module constructor (and takes one constructor
 argument of that type); the number of ports is a second, ordinary `Int`
 parameter:
 
+`src/main/scala/PortDemo.scala`
 ```scala
 class NocRouter[T <: Data](dt: T, n: Int) extends Module {
   val io = IO(new Bundle {
@@ -420,24 +460,31 @@ class NocRouter[T <: Data](dt: T, n: Int) extends Module {
     val outPort = Output(Vec(n, dt))
   })
 
-  // Route the payload according to the address
-  // ...
+  // Route the payload according to the address; a plain swap of the two ports
+  // stands in for real routing here, just enough to elaborate (n = 2).
+  io.outPort(0) := io.inPort(1)
+  io.outPort(1) := io.inPort(0)
 }
 ```
-*illustrative*
 
 Define the payload type as an ordinary `Bundle`, then instantiate the router
 with an instance of that type and the port count:
 
+`src/main/scala/PortDemo.scala`
 ```scala
 class Payload extends Bundle {
   val data = UInt(16.W)
   val flag = Bool()
 }
-
-val router = Module(new NocRouter(new Payload, 2))
 ```
-*illustrative*
+
+`src/main/scala/PortDemo.scala`
+```scala
+  val router = Module(new NocRouter(new Payload, 2))
+```
+
+The wrapper `UseParamRouter` in that file connects it up so there is
+something to generate Verilog for.
 
 ### Parameterized Bundles
 
@@ -458,17 +505,18 @@ class — and when Chisel needs to clone the `Bundle`'s type (e.g. inside a
 `Vec`), that public field gets in the way. The fix is to mark the parameter
 `private`:
 
+`src/main/scala/PortDemo.scala`
 ```scala
 class Port[T <: Data](private val dt: T) extends Bundle {
   val address = UInt(8.W)
   val data = dt.cloneType
 }
 ```
-*illustrative*
 
 With that fixed `Bundle`, the router's ports become a single parameterized
 type, and it is instantiated by wrapping the payload type in a `Port`:
 
+`src/main/scala/PortDemo.scala`
 ```scala
 class NocRouter2[T <: Data](dt: T, n: Int) extends Module {
   val io = IO(new Bundle {
@@ -476,13 +524,139 @@ class NocRouter2[T <: Data](dt: T, n: Int) extends Module {
     val outPort = Output(Vec(n, dt))
   })
 
-  // Route the payload according to the address
-  // ...
+  // Route the payload according to the address; again a swap stands in for the
+  // real routing logic.
+  io.outPort(0) := io.inPort(1)
+  io.outPort(1) := io.inPort(0)
 }
-
-val router = Module(new NocRouter2(new Port(new Payload), 2))
 ```
-*illustrative*
+
+`src/main/scala/PortDemo.scala`
+```scala
+  val router = Module(new NocRouter2(new Port(new Payload), 2))
+```
+
+`UseParamRouter2` wraps it the same way as `UseParamRouter`, and
+`src/test/scala/PortDemoTest.scala` checks that both fields of the `Port`
+actually survive the trip through the router.
+
+#### Why `private`, exactly — see it for yourself
+
+"Gets in the way" is vague, so this chapter also carries the same `Bundle` with
+the parameter left *public*, right next to it in the same file:
+
+`src/main/scala/PortDemo.scala`
+```scala
+class PortPublic[T <: Data](val dt: T) extends Bundle {
+  val address = UInt(8.W)
+  val data = dt.cloneType
+}
+```
+
+Generate both routers and print their port lists:
+
+```
+$ sbt "runMain PortDemo"
+```
+
+**Without `private`** — `new NocRouter2(new PortPublic(new Payload), 2)` gives
+a router whose every port carries the payload *twice*:
+
+```
+module NocRouter2(
+  input         clock,
+                reset,
+  input  [15:0] io_inPort_0_dt_data,
+  input         io_inPort_0_dt_flag,
+  input  [7:0]  io_inPort_0_address,
+  input  [15:0] io_inPort_0_data_data,
+  input         io_inPort_0_data_flag,
+  input  [15:0] io_inPort_1_dt_data,
+  input         io_inPort_1_dt_flag,
+  input  [7:0]  io_inPort_1_address,
+  input  [15:0] io_inPort_1_data_data,
+  input         io_inPort_1_data_flag,
+  output [15:0] io_outPort_0_dt_data,
+  output        io_outPort_0_dt_flag,
+  output [7:0]  io_outPort_0_address,
+  output [15:0] io_outPort_0_data_data,
+  output        io_outPort_0_data_flag,
+  output [15:0] io_outPort_1_dt_data,
+  output        io_outPort_1_dt_flag,
+  output [7:0]  io_outPort_1_address,
+  output [15:0] io_outPort_1_data_data,
+  output        io_outPort_1_data_flag
+);
+```
+
+The eight `_dt_` ports are the damage: a full extra `Payload` (16-bit `data` +
+`flag`) on each of the two input and two output ports.
+
+**With `private`** — `new NocRouter2(new Port(new Payload), 2)` emits only the
+two fields the `Bundle` actually declares:
+
+```
+module NocRouter2(
+  input         clock,
+                reset,
+  input  [7:0]  io_inPort_0_address,
+  input  [15:0] io_inPort_0_data_data,
+  input         io_inPort_0_data_flag,
+  input  [7:0]  io_inPort_1_address,
+  input  [15:0] io_inPort_1_data_data,
+  input         io_inPort_1_data_flag,
+  output [7:0]  io_outPort_0_address,
+  output [15:0] io_outPort_0_data_data,
+  output        io_outPort_0_data_flag,
+  output [7:0]  io_outPort_1_address,
+  output [15:0] io_outPort_1_data_data,
+  output        io_outPort_1_data_flag
+);
+```
+
+Note that nothing failed in the first case. No warning, no error — the
+`Bundle` is just silently wider, and that extra copy rides along through every
+`:=`, every `Vec` entry, and every register that holds a `Port`.
+
+The reason is that Chisel keeps no list of a `Bundle`'s declared fields. It
+discovers them by **reflection over the bundle's public, zero-argument members
+whose type is `Data`** — so *any* public `Data`-typed member *is* a hardware
+field, and a `val` constructor parameter of type `T <: Data` is exactly that.
+The demo prints the field map (`elements`) Chisel builds for each:
+
+```
+Port        fields: data, address
+PortPublic  fields: data, address, dt
+```
+
+It only becomes a hard error if the `cloneType` is dropped as well, because
+then the public `dt` and `data` are the *same* object — the third case in the
+demo:
+
+`src/main/scala/PortDemo.scala`
+```scala
+class PortAliased[T <: Data](val dt: T) extends Bundle {
+  val address = UInt(8.W)
+  val data = dt
+}
+```
+
+Chisel's aliasing check rejects that outright instead of silently widening the
+`Bundle`:
+
+```
+chisel3.AliasedAggregateFieldException: PortAliased contains aliased fields named (data,dt)
+```
+
+One caveat about the book's "naive attempt" above: `class Port[T <: Data](dt: T)`
+has no `val`, so Scala makes `dt` `private[this]`; it never reaches `elements`,
+and on Chisel 6.5.0 that spelling behaves identically to the `private val` one.
+The phantom field appears only once the parameter is written `val dt: T`.
+Writing `private val` is the deliberate form: the parameter is kept as a field
+the bundle's own methods can use, yet can never be mistaken for a port. (The
+advice also predates the Chisel compiler plugin, when `cloneType` was inferred
+by reflecting over constructor parameters; Chisel 6's plugin generates the
+clone instead, so the `elements` pollution is the part that still matters.)
 
 ### Optional Ports
 
@@ -492,6 +666,7 @@ exposes every register (useful for the tester, wasteful in the final
 design). The `debug: Boolean` constructor parameter decides — via Scala's
 `Option` (`Some`/`None`) — whether the port exists at all:
 
+`src/main/scala/RegisterFile.scala`
 ```scala
 class RegisterFile(debug: Boolean) extends Module {
   val io = IO(new Bundle {
@@ -511,20 +686,60 @@ class RegisterFile(debug: Boolean) extends Module {
   when(io.wrEna) {
     regfile(io.rd) := io.wrData
   }
+  // The port is unwrapped with .get - only ever reached when it exists.
   if (debug) {
     io.dbgPort.get := regfile
   }
 }
 ```
-*illustrative — we built this exact register file (without the optional port)
-in [Chapter 2](../ch02-basic-components/README.md).*
+
+(We built this same register file, without the optional port, in
+[Chapter 2](../ch02-basic-components/README.md).)
+
+Note where the decision happens: `if (debug)` is **Scala**, evaluated while the
+hardware is being constructed, so it chooses *what to build* — it is not a
+multiplexer. `io.dbgPort` is a Scala `Option[Vec[UInt]]`, not a hardware
+signal, and `.get` unwraps it. Guarding the assignment with `if (debug)` is
+what keeps `.get` from ever running on a `None`.
 
 On the tester side, the optional port is unwrapped the same way, with `.get`:
 
+`src/test/scala/RegisterFileTest.scala`
 ```scala
-dut.io.dbgPort.get(4).expect(123.U)
+      dut.io.dbgPort.get(4).expect(123.U)
 ```
-*illustrative*
+
+The whole register file is visible at once through that one port, which is what
+makes it worth having in a tester:
+
+`src/test/scala/RegisterFileTest.scala`
+```scala
+      // Every register is visible at once through the debug port.
+      dut.io.dbgPort.get(4).expect(123.U)
+      dut.io.dbgPort.get(2).expect(456.U)
+      dut.io.dbgPort.get(7).expect(0.U)
+```
+
+Build the same module with `debug = false` and the port is simply not there.
+Two things follow, both asserted in the test:
+
+`src/test/scala/RegisterFileTest.scala`
+```scala
+  it should "raise an exception when the missing port is unwrapped" in {
+    test(new RegisterFile(false)) { dut =>
+      assert(dut.io.dbgPort.isEmpty)
+      intercept[NoSuchElementException] {
+        dut.io.dbgPort.get(4).expect(123.U)
+      }
+    }
+  }
+```
+
+First, reaching for the port anyway is a plain Scala `NoSuchElementException`
+(`None.get`) raised while the test elaborates — not a hardware fault, and not
+something the Chisel compiler can catch for you. Second, the `None` port costs
+*nothing*: it leaves no trace in the generated Verilog, which is the entire
+point of making it optional.
 
 ---
 
@@ -537,11 +752,52 @@ dut.io.dbgPort.get(4).expect(123.U)
 `src/main/scala/Ticker.scala`
 ```scala
 abstract class Ticker(n: Int) extends Module {
-  val io = IO(new Bundle { val tick = Output(Bool()) })
+  val io = IO(new Bundle {
+    val tick = Output(Bool())
+  })
 }
-class UpTicker(n: Int)   extends Ticker(n) { /* count up   */ }
-class DownTicker(n: Int) extends Ticker(n) { /* count down */ }
-class NerdTicker(n: Int) extends Ticker(n) { /* count to -1 */ }
+```
+
+Each subclass generates the tick its own way — counting up, counting down, or
+counting down to `-1` to avoid a comparator:
+
+`src/main/scala/Ticker.scala`
+```scala
+// Tick generation by counting up.
+class UpTicker(n: Int) extends Ticker(n) {
+  val N = (n - 1).U
+  val cntReg = RegInit(0.U(8.W))
+  cntReg := cntReg + 1.U
+  val tick = cntReg === N
+  when(tick) {
+    cntReg := 0.U
+  }
+  io.tick := tick
+}
+
+// Tick generation by counting down to 0.
+class DownTicker(n: Int) extends Ticker(n) {
+  val N = (n - 1).U
+  val cntReg = RegInit(N)
+  cntReg := cntReg - 1.U
+  when(cntReg === 0.U) {
+    cntReg := N
+  }
+  io.tick := cntReg === N
+}
+
+// The "nerd" version: count down to -1 to avoid a comparator.
+class NerdTicker(n: Int) extends Ticker(n) {
+  val N = n
+  val MAX = (N - 2).S(8.W)
+  val cntReg = RegInit(MAX)
+  io.tick := false.B
+  cntReg := cntReg - 1.S
+  when(cntReg(7)) {
+    cntReg := MAX
+    io.tick := true.B
+  }
+}
 ```
 
 *Scala note — an `abstract class` with constructor parameters → [§A.5](../SCALA-NOTES.md#a5-abstract-class-with-constructor-parameters).*
@@ -552,18 +808,15 @@ The tester takes `[T <: Ticker]`, so it accepts any implementation:
 ```scala
 trait TickerTestFunc {
   def testFn[T <: Ticker](dut: T, n: Int) = {
-    // -1 means that no ticks have been seen yet
-    var count = -1
+    var count = -1   // -1 means no tick seen yet
     for (_ <- 0 to n * 3) {
-      // Check for correct output
       if (count > 0)
         dut.io.tick.expect(false.B)
       else if (count == 0)
         dut.io.tick.expect(true.B)
 
-      // Reset the counter on a tick
       if (dut.io.tick.peekBoolean())
-        count = n-1
+        count = n - 1
       else
         count -= 1
       dut.clock.step()
@@ -630,8 +883,16 @@ balanced tree instead, and is what this chapter's project actually uses:
 
 `src/main/scala/functional.scala`
 ```scala
-val sum = vec.reduceTree(_ + _)                       // sum via an adder tree
-val min = vec.reduceTree((x, y) => Mux(x < y, x, y))  // minimum via a mux tree
+  val sum = vec.reduceTree(_ + _)
+```
+
+The same call with a `Mux` instead of an adder yields a minimum-search tree, in
+`FunctionalMin`:
+
+`src/main/scala/functional.scala`
+```scala
+  // (a) minimum value only: reduceTree with a Mux.
+  val min = vec.reduceTree((x, y) => Mux(x < y, x, y))
 ```
 
 To find the **minimum and its index**, carry both through the reduction — with
@@ -639,9 +900,11 @@ a `Bundle`, or with Scala **tuples** + `zipWithIndex`:
 
 `src/main/scala/functional.scala`
 ```scala
-val resFun = vec.zipWithIndex
-  .map((x) => (x._1, x._2.U))
-  .reduce((x, y) => (Mux(x._1 < y._1, x._1, y._1), Mux(x._1 < y._1, x._2, y._2)))
+  // (c) value AND index, using Scala tuples + zipWithIndex + reduce.
+  val resFun = vec.zipWithIndex
+    .map((x) => (x._1, x._2.U))
+    .reduce((x, y) => (Mux(x._1 < y._1, x._1, y._1),
+      Mux(x._1 < y._1, x._2, y._2)))
 ```
 
 Here `zipWithIndex` turns the `Vec[UInt]` into a Scala `Vector` of tuples
@@ -674,23 +937,33 @@ model** (`ScalaFunctionalMin.findMin`) — a powerful testing pattern.
 
 ### An Arbitration Tree
 
-`reduceTree` also builds an arbitration tree out of nothing but 2:1 arbiters:
+`reduceTree` also builds an arbitration tree out of nothing but 2:1 arbiters.
+A base class fixes the interface: the input is a `Vec` of ready/valid
+(`DecoupledIO`) interfaces, the output a single ready/valid interface.
 
+`src/main/scala/ArbiterTree.scala`
 ```scala
 class Arbiter[T <: Data: Manifest](n: Int, private val gen: T) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Vec(n, new DecoupledIO(gen)))
     val out = new DecoupledIO(gen)
   })
-
-  io.out <> io.in.reduceTree((a, b) => arbitrateSimp(a, b))
 }
 ```
-*illustrative*
 
-The input is a `Vec` of ready/valid (`DecoupledIO`) interfaces, the output a
-single ready/valid interface. All that's left is a function that arbitrates
-between exactly two requests.
+(`gen` is a `private val` for exactly the reason given under
+[Parameterized Bundles](#parameterized-bundles) — a public `Data`-typed field
+would become a stray element of the surrounding `Bundle`.)
+
+A subclass then supplies a function that arbitrates between exactly two
+requests, and reduces the whole `Vec` with it — that single line *is* the tree:
+
+`src/main/scala/ArbiterTree.scala`
+```scala
+  io.out <> io.in.reduceTree((a, b) => arbitrateFair(a, b))
+```
+
+All that is left is to write the 2:1 arbitration function itself.
 
 #### Simple Arbitration
 
@@ -701,45 +974,42 @@ directly here: with a ready/valid interface, a combinational path from
 holds `valid` until it is read (acknowledged by `ready`), and that `ready`
 can be asserted one cycle after `valid` is seen:
 
+`src/main/scala/ArbiterTree.scala`
 ```scala
-def arbitrateSimp(a: DecoupledIO[T], b: DecoupledIO[T]) = {
+  def arbitrateSimp(a: DecoupledIO[T], b: DecoupledIO[T]) = {
 
-  val regData = Reg(gen)
-  val regEmpty = RegInit(true.B)
-  val regReadyA = RegInit(false.B)
-  val regReadyB = RegInit(false.B)
+    val regData = Reg(gen)
+    val regEmpty = RegInit(true.B)
+    val regReadyA = RegInit(false.B)
+    val regReadyB = RegInit(false.B)
 
-  val out = Wire(new DecoupledIO(gen))
+    val out = Wire(new DecoupledIO(gen))
 
-  when (a.valid & regEmpty & !regReadyB) {
-    regReadyA := true.B
-  } .elsewhen (b.valid & regEmpty & !regReadyA) {
-    regReadyB := true.B
-  }
-  a.ready := regReadyA
-  b.ready := regReadyB
+    when (a.valid & regEmpty & !regReadyB) {
+      regReadyA := true.B
+    } .elsewhen (b.valid & regEmpty & !regReadyA) {
+      regReadyB := true.B
+    }
+    a.ready := regReadyA
+    b.ready := regReadyB
 
-  when (regReadyA) {
-    regData := a.bits
-    regEmpty := false.B
-    regReadyA := false.B
-  }
-  when (regReadyB) {
-    regData := b.bits
-    regEmpty := false.B
-    regReadyB := false.B
-  }
+    when (regReadyA) {
+      regData := a.bits
+      regEmpty := false.B
+      regReadyA := false.B
+    }
+    when (regReadyB) {
+      regData := b.bits
+      regEmpty := false.B
+      regReadyB := false.B
+    }
 
-  out.valid := !regEmpty
-  when (out.ready) {
-    regEmpty := true.B
-  }
+    out.valid := !regEmpty
+    when (out.ready) {
+      regEmpty := true.B
+    }
 
-  out.bits := regData
-  out
-}
 ```
-*illustrative*
 
 Four registers do the work: `regData` holds the output data, `regEmpty`
 flags that the data register is empty, and `regReadyA`/`regReadyB` are the
@@ -759,51 +1029,45 @@ A priority arbiter lets a high-priority requester dominate. A **fair** 2:1
 arbiter instead remembers who won last time, using a small state machine
 with two idle states (so each input gets a turn) and two "has data" states:
 
+`src/main/scala/ArbiterTree.scala`
 ```scala
-def arbitrateFair(a: DecoupledIO[T], b: DecoupledIO[T]) = {
-  object State extends ChiselEnum {
-    val idleA, idleB, hasA, hasB = Value
-  }
-  import State._
-  val regData = Reg(gen)
-  val regState = RegInit(idleA)
-  val out = Wire(new DecoupledIO(gen))
-  a.ready := regState === idleA
-  b.ready := regState === idleB
-  out.valid := (regState === hasA || regState === hasB)
-  switch(regState) {
-    is (idleA) {
-      when (a.valid) {
-        regData := a.bits
-        regState := hasA
-      } otherwise {
-        regState := idleB
-      }
+  def arbitrateFair(a: DecoupledIO[T], b: DecoupledIO[T]) = {
+    object State extends ChiselEnum {
+      val idleA, idleB, hasA, hasB = Value
     }
-    is (idleB) {
-      when (b.valid) {
-        regData := b.bits
-        regState := hasB
-      } otherwise {
-        regState := idleA
+    import State._
+    val regData = Reg(gen)
+    val regState = RegInit(idleA)
+    val out = Wire(new DecoupledIO(gen))
+    a.ready := regState === idleA
+    b.ready := regState === idleB
+    out.valid := (regState === hasA || regState === hasB)
+    switch(regState) {
+      is (idleA) {
+        when (a.valid) {
+          regData := a.bits
+          regState := hasA
+        } otherwise {
+          regState := idleB
+        }
       }
-    }
-    is (hasA) {
-      when (out.ready) {
-        regState := idleB
+      is (idleB) {
+        when (b.valid) {
+          regData := b.bits
+          regState := hasB
+        } otherwise {
+          regState := idleA
+        }
       }
-    }
-    is (hasB) {
-      when (out.ready) {
-        regState := idleA
+      is (hasA) {
+        when (out.ready) {
+          regState := idleB
+        }
       }
-    }
-  }
-  out.bits := regData
-  out
-}
+      is (hasB) {
+        when (out.ready) {
+          regState := idleA
 ```
-*illustrative*
 
 One data register plus one state register are enough. In `idleA`, only input
 `a` is accepted (`ready` for `a` only); if `a` isn't valid, the state moves on
@@ -814,8 +1078,41 @@ winner alternates rather than letting one input starve the other. (With just
 one data register, the arbiter can only be ready for one input at a time; a
 second data register would be needed to accept both inputs in the same
 cycle.) Building an `Arbiter` out of these functions and `reduceTree` gives a
-whole arbitration tree essentially "for free" — see `ArbiterTree.scala` in
-the main repo for the full runnable version.
+whole arbitration tree essentially "for free".
+
+#### Fair vs. priority, measured
+
+`src/test/scala/ArbiterTreeTest.scala` drives both trees through the base class
+`Arbiter[_ <: UInt]` — one tester, two implementations, the same trick as
+`TickerTest`. Each of the four inputs requests forever with a distinct value
+(input *i* sends *i+1*), and the test records what reaches the output.
+
+The **fair** tree round-robins, so nothing starves:
+
+```
+fair served: List(3, 1, 4, 2, 3, 1, 4, 2, 3, 1, 4, 2, 3, 1, 4, 2, 3, 1, 4)
+```
+
+The **priority** tree serves only values `1` and `3` — inputs 1 and 3 are the
+`b` side of their 2:1 node, and `a` always wins, so they never get a turn:
+
+```
+priority served: List(1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3)
+```
+
+Both lines are printed by `sbt test`. That is the section's point made
+concrete, and the tests assert exactly it:
+`ArbiterTree` must serve all four inputs, `ArbiterSimpleTree` must starve two.
+
+> **A second caveat on the simple arbiter.** Its last statement is
+> `when (out.ready) { regEmpty := true.B }` — it empties the data register
+> whenever `ready` is high, without checking `valid`. Because that assignment
+> comes *after* the capture, last-connect-wins makes it override the capture. A
+> consumer that simply parks `ready` high therefore receives **nothing at all**,
+> which is why the test asserts an empty output for that case. A correct
+> handshake would empty the register only on `out.valid && out.ready`. The fair
+> arbiter has no such problem: it moves state only on `out.ready` while in a
+> `has` state.
 
 ---
 
@@ -825,10 +1122,10 @@ the main repo for the full runnable version.
 $ sbt test
 ```
 
-Expected tail (10 tests):
+Expected tail (22 tests):
 
 ```
-[info] Tests: succeeded 10, failed 0, canceled 0, ignored 0, pending 0
+[info] Tests: succeeded 22, failed 0, canceled 0, ignored 0, pending 0
 [info] All tests passed.
 ```
 
@@ -839,12 +1136,25 @@ $ sbt "runMain Generate"
 ```
 
 emits `BcdTable.sv`, `GenHardware.sv`, `UseAdder.sv`, `ParamFunc.sv`,
-`FunctionalMin.sv`, and `UpTicker.sv`. And the case-class demo:
+`FunctionalMin.sv`, `UpTicker.sv`, `ArbiterTree.sv` (the generated 4:1
+arbitration tree), and `UseParamRouter.sv` / `UseParamRouter2.sv` (the two
+type-parameterized routers). And the case-class demo:
 
 ```
 $ sbt "runMain ConfigDemo"
 ...
 The width is 16
+```
+
+And the parameterized-`Bundle` comparison from
+[Parameterized Bundles](#parameterized-bundles), which prints the router's port
+list with and without the `private` parameter (it writes no `.sv` files):
+
+```
+$ sbt "runMain PortDemo"
+...
+Port        fields: data, address
+PortPublic  fields: data, address, dt
 ```
 
 ---

@@ -69,7 +69,8 @@ class FunctionalMin(n: Int, w: Int) extends Module {
   // (c) value AND index, using Scala tuples + zipWithIndex + reduce.
   val resFun = vec.zipWithIndex
     .map((x) => (x._1, x._2.U))
-    .reduce((x, y) => (Mux(x._1 < y._1, x._1, y._1), Mux(x._1 < y._1, x._2, y._2)))
+    .reduce((x, y) => (Mux(x._1 < y._1, x._1, y._1), 
+      Mux(x._1 < y._1, x._2, y._2)))
 
   io.min := min
   io.resA := res.v
