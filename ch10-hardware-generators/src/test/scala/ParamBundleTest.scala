@@ -30,6 +30,11 @@ class ParamBundleTest extends AnyFlatSpec with ChiselScalatestTester {
     assert(p.exists(_.endsWith("io_inPort_0_data_data")))
   }
 
+  // `private val` is the book's spelling and is just as safe as no `val`.
+  "PortPrivate" should "keep its type parameter out of the Bundle's fields too" in {
+    assert(fields(new PortPrivate(new Payload)).toSet == Set("address", "data"))
+  }
+
   "PortPublic" should "leak the public parameter as a third field" in {
     assert(fields(new PortPublic(new Payload)).toSet == Set("address", "data", "dt"))
   }

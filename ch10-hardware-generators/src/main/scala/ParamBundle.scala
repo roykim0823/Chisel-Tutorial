@@ -7,15 +7,26 @@ import circt.stage.ChiselStage
 //
 // `Payload` comes from ParamModule.scala (same default package, no import).
 
-// The book's version: `private` keeps the constructor parameter out of the
-// field list Chisel builds by reflection, so the Bundle has exactly two fields.
-class Port[T <: Data](private val dt: T) extends Bundle {
+// The type parameter is written without a `val`, so it never becomes a public
+// member - Chisel builds a Bundle's field list by reflecting over the public
+// members whose type is Data, and this Bundle has exactly two of them.
+class Port[T <: Data](dt: T) extends Bundle {
   val address = UInt(8.W)
   val data = dt.cloneType
 }
 
-// Same Bundle with a *public* val parameter. Chisel reflects over the public
-// members whose type is Data, so `dt` silently becomes a third field.
+// The book's spelling. `private val` keeps `dt` as a real field of the class -
+// so the Bundle's own methods can read it, even off another instance, which a
+// bare private[this] parameter does not allow - while still keeping it out of
+// the PUBLIC members Chisel reflects over. Same two fields as `Port`.
+class PortPrivate[T <: Data](private val dt: T) extends Bundle {
+  val address = UInt(8.W)
+  val data = dt.cloneType
+}
+
+// The same Bundle with a PUBLIC val parameter: Chisel reflects over the public
+// members whose type is Data, so `dt` silently becomes a third field. This is
+// the only one of the three spellings that does damage.
 class PortPublic[T <: Data](val dt: T) extends Bundle {
   val address = UInt(8.W)
   val data = dt.cloneType
@@ -64,7 +75,7 @@ class UseParamRouter2 extends Module {
   io.outB := router.io.outPort(1).data
 }
 
-// Shows what the `private` in `Port` buys us.
+// Shows what keeping the type parameter out of the public members buys us.
 // Run with:  sbt "runMain PortDemo"
 object PortDemo extends App {
 
@@ -84,11 +95,15 @@ object PortDemo extends App {
     lines.take(lines.indexWhere(_.trim.startsWith(");")) + 1).mkString("\n")
   }
 
-  println(s"Port        fields: ${fields(new Port(new Payload))}")
-  println(s"PortPublic  fields: ${fields(new PortPublic(new Payload))}")
+  println(s"Port         (dt, no val)      fields: ${fields(new Port(new Payload))}")
+  println(s"PortPrivate  (private val dt)  fields: ${fields(new PortPrivate(new Payload))}")
+  println(s"PortPublic   (val dt)          fields: ${fields(new PortPublic(new Payload))}")
 
-  println("\n--- private val dt (correct) ---")
+  println("\n--- dt without val (correct) ---")
   println(portList(new Port(new Payload)))
+
+  println("\n--- dt with private val (correct) ---")
+  println(portList(new PortPrivate(new Payload)))
 
   println("\n--- val dt (public: extra dt field) ---")
   println(portList(new PortPublic(new Payload)))

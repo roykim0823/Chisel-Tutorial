@@ -45,7 +45,8 @@ class ParamFunc extends Module {
   val fVal = Wire(new ComplexIO)
   fVal.b := false.B
   fVal.d := 13.U
-  val resB = myMux(io.selB, tVal, fVal)
+
+  val resB = myMux(io.selB, tVal, fVal)  // Muxing a Bundle type
 
   io.resA := resA
   io.resB := resB

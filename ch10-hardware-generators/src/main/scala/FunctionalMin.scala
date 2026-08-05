@@ -1,42 +1,8 @@
 import chisel3._
 import chisel3.util._
 
-// Functional programming: combine hardware with higher-order functions.
-
-// A function returning TWO outputs via a Scala tuple, then decomposed.
-class FunctionalComp extends Module {
-  val io = IO(new Bundle() {
-    val a = Input(UInt(8.W))
-    val b = Input(UInt(8.W))
-    val equ = Output(UInt(8.W))
-    val gt = Output(UInt(8.W))
-  })
-
-  def compare(a: UInt, b: UInt) = {
-    val equ = a === b
-    val gt = a > b
-    (equ, gt)   // return a tuple
-  }
-
-  val (equ, gt) = compare(io.a, io.b)   // decompose the tuple
-  io.equ := equ
-  io.gt := gt
-}
-
-// Sum a Vec by reducing with an adder. reduceTree builds a balanced tree (short
-// combinational delay) rather than a chain.
-class FunctionalAdd extends Module {
-  val io = IO(new Bundle {
-    val in = Input(Vec(5, UInt(10.W)))
-    val res = Output(UInt(10.W))
-  })
-
-  val vec = io.in
-  val sum = vec.reduceTree(_ + _)
-  io.res := sum
-}
-
-// Find the minimum value (and its index) in a Vec, three functional ways.
+// Find the minimum value (and its index) in a Vec, four functional ways.
+// See Section 10.6.1.
 class FunctionalMin(n: Int, w: Int) extends Module {
   val io = IO(new Bundle {
     val in = Input(Vec(n, UInt(w.W)))
@@ -69,17 +35,23 @@ class FunctionalMin(n: Int, w: Int) extends Module {
   // (c) value AND index, using Scala tuples + zipWithIndex + reduce.
   val resFun = vec.zipWithIndex
     .map((x) => (x._1, x._2.U))
-    .reduce((x, y) => (Mux(x._1 < y._1, x._1, y._1), 
+    .reduce((x, y) => (Mux(x._1 < y._1, x._1, y._1),
       Mux(x._1 < y._1, x._2, y._2)))
+
+  // (d) a Chisel MixedVec carries value and index like a tuple would, but IS a
+  //     Chisel collection - so reduceTree is available again.
+  val scalaVector = vec.zipWithIndex
+    .map((x) => MixedVecInit(x._1, x._2.U(8.W)))
+  val resFun2 = VecInit(scalaVector)
+    .reduceTree((x, y) => Mux(x(0) < y(0), x, y))
 
   io.min := min
   io.resA := res.v
   io.idxA := res.idx
   io.resB := resFun._1
   io.idxB := resFun._2
-  // resC/idxC mirror resA/idxA here (kept for interface compatibility)
-  io.resC := res.v
-  io.idxC := res.idx
+  io.resC := resFun2(0)
+  io.idxC := resFun2(1)
 }
 
 // A pure-Scala reference model, used to check the hardware in the test.
