@@ -5,12 +5,14 @@ class GenHardware extends Module {
   val io = IO(new Bundle {
     val data = Output(Vec(12, UInt(8.W)))
     val len = Output(UInt(8.W))
-    val squareIn = Input(UInt(8.W))
+
+    val squareIn = Input(UInt(3.W))  // 3 bits to index 0..5
     val squareOut = Output(UInt(8.W))
   })
 
   // A Scala String is a Seq[Char]; map each char to a UInt -> a ROM of bytes.
   val msg = "Hello World!"
+  // VecInit takes a Seq of UInts and returns a Vec of UInts.
   val text = VecInit(msg.map(_.U))
   val len = msg.length.U
 

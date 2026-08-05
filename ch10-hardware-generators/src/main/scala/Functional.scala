@@ -3,19 +3,6 @@ import chisel3.util._
 
 // Functional programming: combine hardware with higher-order functions.
 
-// Sum a Vec by reducing with an adder. reduceTree builds a balanced tree (short
-// combinational delay) rather than a chain.
-class FunctionalAdd extends Module {
-  val io = IO(new Bundle {
-    val in = Input(Vec(5, UInt(10.W)))
-    val res = Output(UInt(10.W))
-  })
-
-  val vec = io.in
-  val sum = vec.reduceTree(_ + _)
-  io.res := sum
-}
-
 // A function returning TWO outputs via a Scala tuple, then decomposed.
 class FunctionalComp extends Module {
   val io = IO(new Bundle() {
@@ -34,6 +21,19 @@ class FunctionalComp extends Module {
   val (equ, gt) = compare(io.a, io.b)   // decompose the tuple
   io.equ := equ
   io.gt := gt
+}
+
+// Sum a Vec by reducing with an adder. reduceTree builds a balanced tree (short
+// combinational delay) rather than a chain.
+class FunctionalAdd extends Module {
+  val io = IO(new Bundle {
+    val in = Input(Vec(5, UInt(10.W)))
+    val res = Output(UInt(10.W))
+  })
+
+  val vec = io.in
+  val sum = vec.reduceTree(_ + _)
+  io.res := sum
 }
 
 // Find the minimum value (and its index) in a Vec, three functional ways.

@@ -68,13 +68,36 @@ class RegisterFileTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   // A `None` port costs nothing: it leaves no trace in the generated Verilog.
-  it should "generate no debug ports at all" in {
-    def dbgPorts(debug: Boolean): Int =
-      ChiselStage
-        .emitSystemVerilog(new RegisterFile(debug), firtoolOpts = Array("-strip-debug-info"))
-        .linesIterator
-        .count(l => l.contains("dbgPort") && l.contains("output"))
+  //
+  // Counting the ports needs a little care. firtool coalesces a run of ports
+  // that share a direction and width, so `output [31:0]` is printed once and the
+  // remaining names follow on their own lines:
+  //
+  //   output [31:0] io_rs1Val,
+  //                 io_rs2Val,
+  //                 io_dbgPort_0,
+  //                 io_dbgPort_1,       <- no `output` keyword on this line
+  //
+  // So we walk the module's port list and remember the direction we are inside
+  // of, instead of grepping each line for `output` on its own.
+  def dbgPorts(debug: Boolean): Int = {
+    val lines = ChiselStage
+      .emitSystemVerilog(new RegisterFile(debug), firtoolOpts = Array("-strip-debug-info"))
+      .linesIterator
+      .toList
+    val start = lines.indexWhere(_.startsWith("module RegisterFile("))
+    assert(start >= 0, "no RegisterFile module in the generated SystemVerilog")
+    val portList = lines.slice(start + 1, lines.indexWhere(_.trim == ");", start))
+    portList.foldLeft((false, 0)) { case ((inOutput, count), line) =>
+      val nowOutput =
+        if (line.contains("output")) true
+        else if (line.contains("input")) false
+        else inOutput
+      (nowOutput, if (nowOutput && line.contains("io_dbgPort_")) count + 1 else count)
+    }._2
+  }
 
+  it should "generate no debug ports at all" in {
     assert(dbgPorts(true) == 32, s"expected 32 debug outputs, got ${dbgPorts(true)}")
     assert(dbgPorts(false) == 0, s"expected no debug outputs, got ${dbgPorts(false)}")
   }

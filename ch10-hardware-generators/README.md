@@ -10,21 +10,25 @@ with **parameters / case classes / type parameters**, **inheritance**, and
 
 *Conventions: every file path is relative to
 `tutorial/ch10-hardware-generators/`, and every command is run from that folder.
-This chapter has no figures.*
+The book's Chapter 10 has no figures; the arbiter timing diagrams in
+[§10.6](#an-arbitration-tree) are additions of this tutorial, recorded from real
+simulation runs.*
 
 ## What's in this project
 
 ```
 ch10-hardware-generators/
 ├── build.sbt · project/build.properties
+├── figures/                arbiter timing diagrams
 ├── src/main/scala/
-│   ├── functional.scala   functions returning hardware; reduce/reduceTree; min-search
+│   ├── Functional.scala    functions returning hardware; reduce/reduceTree; min-search
 │   ├── BcdTable.scala      binary -> BCD table generated with a Scala loop
 │   ├── GenHardware.scala   VecInit ROM tables (a string, a square table)
 │   ├── ParamAdder.scala    width parameter + two instances
 │   ├── Config.scala         case classes for parameters (+ ConfigDemo)
 │   ├── ParamFunc.scala      a mux parameterized by a Chisel TYPE
-│   ├── PortDemo.scala       type-parameterized routers + why the Bundle param is private
+│   ├── ParamModule.scala    a MODULE parameterized by a Chisel type (router + payload)
+│   ├── ParamBundle.scala    a BUNDLE parameterized by a Chisel type + why the param is private
 │   ├── RegisterFile.scala   optional debug port via Scala's Option
 │   ├── Ticker.scala         abstract base + three implementations (inheritance)
 │   ├── ArbiterTree.scala    reduceTree arbitration tree: fair and priority 2:1
@@ -49,7 +53,6 @@ can be stated explicitly:
 ```scala
 val number: Int = 42
 ```
-*illustrative*
 
 A `for` loop is the classic way to drive a circuit generator. The following
 loop connects the bits of a shift register one to the next:
@@ -62,7 +65,7 @@ for (i <- 1 until 8) {
   regVec(i) := regVec(i - 1)
 }
 ```
-*illustrative*
+
 
 > This is *not* the most concise way to write a shift register. It is better
 > to use a plain `UInt` of the right width and assign its new value with an
@@ -79,7 +82,6 @@ val city = (2000, "Frederiksberg")
 val zipCode = city._1
 val name = city._2
 ```
-*illustrative*
 
 *Scala note — Scala tuples → [§G.2](../SCALA-NOTES.md#g2-tuples).*
 
@@ -94,7 +96,6 @@ for Chisel hardware generators:
 val numbers = Seq(1, 15, -2, 0)
 val second = numbers(1)   // second == 15
 ```
-*illustrative*
 
 ---
 
@@ -110,7 +111,6 @@ def adder(x: UInt, y: UInt) = {
   x + y
 }
 ```
-*illustrative*
 
 *Scala note — a `def` method → [§C.4](../SCALA-NOTES.md#c4-def-methods), and a block's value is its last expression → [§C.5](../SCALA-NOTES.md#c5-block-as-expression-implicit-return).*
 
@@ -122,7 +122,6 @@ val x = adder(a, b)
 // another adder
 val y = adder(c, d)
 ```
-*illustrative*
 
 > This adder is an artificial example to keep things simple — Chisel already
 > provides an adder generator via the `+` operator (`UInt`'s `+(that: UInt)`).
@@ -133,7 +132,7 @@ single statement, the curly braces can be omitted:
 ```scala
 def delay(x: UInt) = RegNext(x)
 ```
-*illustrative*
+
 
 Calling the function with itself as the argument chains two registers,
 producing a two-clock-cycle delay:
@@ -141,7 +140,7 @@ producing a two-clock-cycle delay:
 ```scala
 val delOut = delay(delay(delIn))
 ```
-*illustrative*
+
 
 > Again, too small an example to be useful on its own — `RegNext()` already
 > *is* the one-cycle delay function; this just shows function composition.
@@ -149,7 +148,7 @@ val delOut = delay(delay(delIn))
 Functions return only one value. To return more than one, wrap several
 output wires in a Scala **tuple**:
 
-`src/main/scala/functional.scala`
+`src/main/scala/Functional.scala`
 ```scala
   def compare(a: UInt, b: UInt) = {
     val equ = a === b
@@ -165,11 +164,10 @@ val cmp = compare(inA, inB)
 val equResult = cmp._1
 val gtResult = cmp._2
 ```
-*illustrative*
 
 Or decomposed directly into named wires, as this chapter's project does:
 
-`src/main/scala/functional.scala`
+`src/main/scala/Functional.scala`
 ```scala
   val (equ, gt) = compare(io.a, io.b)   // decompose the tuple
 ```
@@ -242,15 +240,13 @@ class FileReader extends Module {
     idx += 1
   }
 
-  // convert the Scala integer array to a Seq
-  // and then into a vector of Chisel UInt
+  // convert the Scala Array to a Scala sequence Seq
   val table = VecInit(array.toIndexedSeq.map(_.U(8.W)))
 
   // use the table
   io.data := table(io.address)
 }
 ```
-*illustrative*
 
 The maybe-intimidating line is `VecInit(array.toIndexedSeq.map(_.U(8.W)))`:
 `toIndexedSeq` converts the Scala `Array` to a `Seq`, which supports `map`.
@@ -264,21 +260,19 @@ Chisel values. The same pattern (`msg.map(_.U)`, above) is what turns the
 ### Type Conversion
 
 All Chisel types are ultimately just a collection of bits, so converting
-between them is easy. A `Vec` of bytes can be packed into a `UInt` (the first
+between them is easy. A `Vec` of bytes can be packed into a 32-bit `UInt` (the first
 element lands in the low bits):
 
 ```scala
 val vec = Wire(Vec(4, UInt(8.W)))
 val word = vec.asUInt
 ```
-*illustrative*
 
 and unpacked back with `asTypeOf`:
 
 ```scala
 val vec2 = word.asTypeOf(Vec(4, UInt(8.W)))
 ```
-*illustrative*
 
 A `Bundle` converts to a `UInt` the same way:
 
@@ -290,20 +284,15 @@ class MyBundle extends Bundle {
 
 val bundle = Wire(new MyBundle)
 val word2 = bundle.asUInt
-```
-*illustrative*
 
-```scala
 val bundle2 = word2.asTypeOf(new MyBundle)
 ```
-*illustrative*
 
 and the same conversion can zero-initialize every field of a bundle at once:
 
 ```scala
 val bundle3 = 0.U.asTypeOf(new MyBundle)
 ```
-*illustrative*
 
 > **Bit order caveat:** a `Bundle`'s fields are packed in the *opposite* order
 > from a `Vec`'s elements — the **last** declared field (`b` above) lands in
@@ -335,6 +324,63 @@ Two differently-sized adders then come from the same generator — inside
 ```scala
   val add8 = Module(new ParamAdder(8))
   val add16 = Module(new ParamAdder(16))
+```
+
+**How do you test a parameter?** There is nothing to poke: `n` is consumed at
+*generation* time and has vanished by the time the simulation starts. What you
+*can* observe is the one place the width shows through — an n-bit `+` keeps n
+bits, so the carry out is dropped and the sum wraps modulo 2ⁿ. The bench builds
+one test per width with an ordinary Scala `for` loop, the same trick the
+generator itself uses:
+
+`src/test/scala/ParamAdderTest.scala`
+```scala
+  for (n <- Seq(4, 8, 16)) {
+    val mask = (1 << n) - 1
+
+    s"ParamAdder($n)" should s"add modulo 2^$n" in {
+      test(new ParamAdder(n)) { dut =>
+        val cases = Seq((0, 0), (1, 2), (mask, 0), (mask, 1), (mask, mask), (mask / 2, mask / 2 + 1))
+        for ((a, b) <- cases) {
+          dut.io.a.poke(a.U)
+          dut.io.b.poke(b.U)
+          // An n-bit `+` keeps n bits: the carry out is dropped.
+          dut.io.c.expect(((a + b) & mask).U)
+        }
+      }
+    }
+  }
+```
+
+`UseAdder` is checked the same way. Both instances are fed the full 16-bit
+`io.x`/`io.y`, but `add8`'s ports are only 8 bits wide, so those connections
+**truncate** — and since the result is `add16.io.c | add8.io.c`, the two
+instances are told apart from outside: with `x = 0x00ff, y = 1` the 8-bit adder
+wraps to `0x00` while the 16-bit one produces `0x0100`.
+
+`src/test/scala/ParamAdderTest.scala`
+```scala
+      def check(x: Int, y: Int): Unit = {
+        val sum16 = (x + y) & 0xffff
+        val sum8 = ((x & 0xff) + (y & 0xff)) & 0xff
+        dut.io.x.poke(x.U)
+        dut.io.y.poke(y.U)
+        dut.io.res.expect((sum16 | sum8).U)
+      }
+```
+
+```
+$ sbt "testOnly ParamAdderTest"
+[info] ParamAdderTest:
+[info] ParamAdder(4)
+[info] - should add modulo 2^4
+[info] ParamAdder(8)
+[info] - should add modulo 2^8
+[info] ParamAdder(16)
+[info] - should add modulo 2^16
+[info] UseAdder
+[info] - should combine an 8-bit and a 16-bit instance of the same generator
+[info] Tests: succeeded 4, failed 0, canceled 0, ignored 0, pending 0
 ```
 
 **Case class** — package many parameters into one lightweight, immutable value
@@ -451,7 +497,7 @@ type parameter `T` to the module constructor (and takes one constructor
 argument of that type); the number of ports is a second, ordinary `Int`
 parameter:
 
-`src/main/scala/PortDemo.scala`
+`src/main/scala/ParamModule.scala`
 ```scala
 class NocRouter[T <: Data](dt: T, n: Int) extends Module {
   val io = IO(new Bundle {
@@ -470,7 +516,7 @@ class NocRouter[T <: Data](dt: T, n: Int) extends Module {
 Define the payload type as an ordinary `Bundle`, then instantiate the router
 with an instance of that type and the port count:
 
-`src/main/scala/PortDemo.scala`
+`src/main/scala/ParamModule.scala`
 ```scala
 class Payload extends Bundle {
   val data = UInt(16.W)
@@ -478,7 +524,7 @@ class Payload extends Bundle {
 }
 ```
 
-`src/main/scala/PortDemo.scala`
+`src/main/scala/ParamModule.scala`
 ```scala
   val router = Module(new NocRouter(new Payload, 2))
 ```
@@ -505,7 +551,7 @@ class — and when Chisel needs to clone the `Bundle`'s type (e.g. inside a
 `Vec`), that public field gets in the way. The fix is to mark the parameter
 `private`:
 
-`src/main/scala/PortDemo.scala`
+`src/main/scala/ParamBundle.scala`
 ```scala
 class Port[T <: Data](private val dt: T) extends Bundle {
   val address = UInt(8.W)
@@ -516,7 +562,7 @@ class Port[T <: Data](private val dt: T) extends Bundle {
 With that fixed `Bundle`, the router's ports become a single parameterized
 type, and it is instantiated by wrapping the payload type in a `Port`:
 
-`src/main/scala/PortDemo.scala`
+`src/main/scala/ParamBundle.scala`
 ```scala
 class NocRouter2[T <: Data](dt: T, n: Int) extends Module {
   val io = IO(new Bundle {
@@ -531,21 +577,23 @@ class NocRouter2[T <: Data](dt: T, n: Int) extends Module {
 }
 ```
 
-`src/main/scala/PortDemo.scala`
+`src/main/scala/ParamBundle.scala`
 ```scala
   val router = Module(new NocRouter2(new Port(new Payload), 2))
 ```
 
 `UseParamRouter2` wraps it the same way as `UseParamRouter`, and
-`src/test/scala/PortDemoTest.scala` checks that both fields of the `Port`
-actually survive the trip through the router.
+`src/test/scala/ParamBundleTest.scala` checks that both fields of the `Port`
+actually survive the trip through the router. (The type-parameterized *module*
+of the previous section has its own bench,
+`src/test/scala/ParamModuleTest.scala`, one file per source file.)
 
 #### Why `private`, exactly — see it for yourself
 
 "Gets in the way" is vague, so this chapter also carries the same `Bundle` with
 the parameter left *public*, right next to it in the same file:
 
-`src/main/scala/PortDemo.scala`
+`src/main/scala/ParamBundle.scala`
 ```scala
 class PortPublic[T <: Data](val dt: T) extends Bundle {
   val address = UInt(8.W)
@@ -633,7 +681,7 @@ It only becomes a hard error if the `cloneType` is dropped as well, because
 then the public `dt` and `data` are the *same* object — the third case in the
 demo:
 
-`src/main/scala/PortDemo.scala`
+`src/main/scala/ParamBundle.scala`
 ```scala
 class PortAliased[T <: Data](val dt: T) extends Bundle {
   val address = UInt(8.W)
@@ -856,7 +904,6 @@ def add(a: UInt, b: UInt) = a + b
 
 val sum = vec.reduce(add)
 ```
-*illustrative*
 
 The combining function can just as well be an anonymous **function literal**
 instead of a named `def`. The syntax for a function literal is parameters in
@@ -865,7 +912,6 @@ parentheses, followed by `=>`, followed by the body:
 ```scala
 (param) => function body
 ```
-*illustrative*
 
 With Scala's `_` wildcard standing in for the two operands, the whole thing
 collapses to one line:
@@ -873,7 +919,6 @@ collapses to one line:
 ```scala
 val sum = vec.reduce(_ + _)
 ```
-*illustrative*
 
 *Scala note — higher-order functions → [§E.4](../SCALA-NOTES.md#e4-higher-order-functions) and the `_` placeholder (point-free) → [§E.3](../SCALA-NOTES.md#e3-the-_-placeholder-point-free-style).*
 
@@ -881,7 +926,7 @@ val sum = vec.reduce(_ + _)
 *tree* has a shorter combinational delay. **`reduceTree`** builds that
 balanced tree instead, and is what this chapter's project actually uses:
 
-`src/main/scala/functional.scala`
+`src/main/scala/Functional.scala`
 ```scala
   val sum = vec.reduceTree(_ + _)
 ```
@@ -889,7 +934,7 @@ balanced tree instead, and is what this chapter's project actually uses:
 The same call with a `Mux` instead of an adder yields a minimum-search tree, in
 `FunctionalMin`:
 
-`src/main/scala/functional.scala`
+`src/main/scala/Functional.scala`
 ```scala
   // (a) minimum value only: reduceTree with a Mux.
   val min = vec.reduceTree((x, y) => Mux(x < y, x, y))
@@ -898,7 +943,7 @@ The same call with a `Mux` instead of an adder yields a minimum-search tree, in
 To find the **minimum and its index**, carry both through the reduction — with
 a `Bundle`, or with Scala **tuples** + `zipWithIndex`:
 
-`src/main/scala/functional.scala`
+`src/main/scala/Functional.scala`
 ```scala
   // (c) value AND index, using Scala tuples + zipWithIndex + reduce.
   val resFun = vec.zipWithIndex
@@ -925,7 +970,6 @@ val resFun2 = VecInit(scalaVector)
 val minVal = resFun2(0)
 val minIdx = resFun2(1)
 ```
-*illustrative*
 
 Converting the Scala `Vector` of `MixedVec`s into a Chisel `Vec` (via
 `VecInit`) makes `reduceTree` available again, at the cost of an extra
@@ -960,10 +1004,22 @@ requests, and reduces the whole `Vec` with it — that single line *is* the tree
 
 `src/main/scala/ArbiterTree.scala`
 ```scala
-  io.out <> io.in.reduceTree((a, b) => arbitrateFair(a, b))
+  io.out <> io.in.reduceTree((a, b) => arbitrateSimp(a, b))
 ```
 
 All that is left is to write the 2:1 arbitration function itself.
+
+> **About the waveforms below.** The book has no timing diagram for the
+> arbiters, but the two versions are much easier to tell apart when you watch
+> them cycle by cycle. Each diagram below shows **one 2:1 node** (an
+> `Arbiter(2, UInt(8.W))`, i.e. a tree of a single node), with `in(0)` playing
+> the role of `a` and `in(1)` of `b`. Every value in them was **recorded from a
+> real simulation** — a temporary chiseltest bench peeked every port each cycle;
+> the internal registers are shown too, since each one is observable from the
+> ports (`in(0).ready` *is* `regReadyA`, `out.bits` *is* `regData`, `out.valid`
+> is `!regEmpty`, and the fair arbiter's `regState` follows uniquely from
+> `ready`/`valid`/`bits`). You can reproduce them with `WriteVcdAnnotation`
+> (Chapter 3) and GTKWave.
 
 #### Simple Arbitration
 
@@ -1009,6 +1065,10 @@ can be asserted one cycle after `valid` is seen:
       regEmpty := true.B
     }
 
+    out.bits := regData
+    out
+  }
+
 ```
 
 Four registers do the work: `regData` holds the output data, `regEmpty`
@@ -1022,6 +1082,38 @@ assumed `valid`, so its data is captured, `regEmpty` is cleared, and the
 empty; once the receiver asserts `ready`, the register empties again. Note
 this always favors input `a` when both are pending — it is a **priority**
 arbiter, not a fair one.
+
+**Cycle by cycle.** Both inputs request forever (`a` sends `1`, `b` sends `2`,
+both hold `valid` high), and the consumer plays a correct handshake: it asserts
+`out.ready` only in a cycle in which it sees `out.valid`.
+
+<p align="center">
+  <img src="figures/arbiter-priority-wave.png" alt="Priority 2:1 arbiter waveform: input b never gets a ready" width="820">
+</p>
+
+***Timing diagram — the priority arbiter (`arbitrateSimp`), both inputs
+requesting.*** Read it four cycles at a time — that is one full period:
+
+- **Cycle 0** — `regEmpty` is `1` and neither `ready` is asserted yet. This is
+  the cycle in which `a.valid & regEmpty & !regReadyB` holds, so `regReadyA` is
+  set *for the next* cycle. (`ready` is registered; that is the whole point of
+  this arbiter.)
+- **Cycle 1** — `in(0).ready` is high. Because `a` still holds `valid`, the
+  `when (regReadyA)` block captures `a.bits` into `regData`, clears `regEmpty`,
+  and drops `regReadyA` again.
+- **Cycle 2** — `regEmpty` is `0`, so `out.valid` is high with `out.bits = 1`.
+  The consumer sees `valid`, asserts `ready`, and `regEmpty` is set again.
+- **Cycle 3** — `regEmpty` is back to `1`, but no `ready` is asserted yet: a
+  registered `ready` can only be *set* in a cycle where `regEmpty` is already
+  high, so this cycle is spent deciding. Cycle 4 then repeats cycle 1.
+
+Two things stand out. First, the throughput of one node is **one word every
+four cycles** with this consumer — the acknowledge, the capture, and the
+handover each cost a cycle. Second, and the section's real point:
+**`in(1).ready` never rises at all.** Every time `regEmpty` is high, `a.valid`
+is high and `regReadyB` is low, so the `when`/`.elsewhen` chain always takes
+the first branch. Input `b` is locked out forever — that is the starvation the
+test measures.
 
 #### Fair Arbitration
 
@@ -1067,6 +1159,12 @@ with two idle states (so each input gets a turn) and two "has data" states:
       is (hasB) {
         when (out.ready) {
           regState := idleA
+        }
+      }
+    }
+    out.bits := regData
+    out
+  }
 ```
 
 One data register plus one state register are enough. In `idleA`, only input
@@ -1079,6 +1177,42 @@ one data register, the arbiter can only be ready for one input at a time; a
 second data register would be needed to accept both inputs in the same
 cycle.) Building an `Arbiter` out of these functions and `reduceTree` gives a
 whole arbitration tree essentially "for free".
+
+**Cycle by cycle.** Exactly the same stimulus as before — both inputs
+requesting forever, `a` sending `1` and `b` sending `2`, consumer asserting
+`out.ready` only when it sees `out.valid`:
+
+<p align="center">
+  <img src="figures/arbiter-fair-wave.png" alt="Fair 2:1 arbiter waveform: the state machine alternates between the two inputs" width="820">
+</p>
+
+***Timing diagram — the fair arbiter (`arbitrateFair`), both inputs
+requesting.*** The `regState` lane is the whole story; the period is again four
+cycles, but this time it delivers **two** words:
+
+- **Cycle 0** — `regState = idleA`, so `a.ready` (`in(0).ready`) is high and
+  `b.ready` is low. `a.valid` is high, so `regData := a.bits` and the state goes
+  to `hasA`.
+- **Cycle 1** — `hasA`: `out.valid` is high with `out.bits = 1`. The consumer
+  takes it (`out.ready`), and the state moves to `idleB` — the *other* input's
+  turn, which is exactly what makes the arbiter fair.
+- **Cycle 2** — `idleB`: now `in(1).ready` is the one asserted, `b.bits = 2` is
+  captured, state goes to `hasB`.
+- **Cycle 3** — `hasB`: `out.bits = 2` is handed over, and the state returns to
+  `idleA`.
+
+Compare the two `ready` lanes with the priority diagram: here they take turns
+(and are never both high — there is only one data register), so `out.bits`
+alternates `1, 2, 1, 2, …` and neither input starves. Throughput is **one word
+every two cycles**, twice the priority arbiter's, because the idle state does
+the deciding *and* the capturing in one cycle instead of spending a cycle on a
+registered `ready`.
+
+The waveform doesn't show the "input not valid" case, because both inputs
+request in every cycle here. If, say, `a` were idle in `idleA`, the `otherwise`
+branch would move straight to `idleB` on the next edge, so an idle input costs
+one cycle and never blocks the other one. `regData` is undefined (`x`) until the
+first capture — it is a plain `Reg(gen)`, with no reset value.
 
 #### Fair vs. priority, measured
 
@@ -1113,6 +1247,22 @@ concrete, and the tests assert exactly it:
 > handshake would empty the register only on `out.valid && out.ready`. The fair
 > arbiter has no such problem: it moves state only on `out.ready` while in a
 > `has` state.
+>
+> The waveform makes the deadlock obvious — same priority node as above, but with
+> `out.ready` parked high from cycle 0:
+>
+> <p align="center">
+>   <img src="figures/arbiter-priority-parked-wave.png" alt="Priority arbiter with out.ready held high: regEmpty never clears, so out.valid never rises" width="760">
+> </p>
+>
+> ***Timing diagram — the priority arbiter with `out.ready` held high.***
+> `regEmpty` is stuck at `1` for every cycle, so `out.valid` never rises and the
+> consumer receives nothing. Data *is* accepted — `in(0).ready` pulses every
+> other cycle and `regData` becomes `1` — it is just thrown away each time,
+> because the later `when (out.ready) { regEmpty := true.B }` overrides the
+> `regEmpty := false.B` from the capture. Note also that `in(0).ready` now
+> pulses every second cycle rather than every fourth: the arbiter thinks it is
+> empty and keeps re-accepting `a`.
 
 ---
 
@@ -1122,10 +1272,12 @@ concrete, and the tests assert exactly it:
 $ sbt test
 ```
 
-Expected tail (22 tests):
+Expected tail (31 tests across 11 suites):
 
 ```
-[info] Tests: succeeded 22, failed 0, canceled 0, ignored 0, pending 0
+[info] Total number of tests run: 31
+[info] Suites: completed 11, aborted 0
+[info] Tests: succeeded 31, failed 0, canceled 0, ignored 0, pending 0
 [info] All tests passed.
 ```
 

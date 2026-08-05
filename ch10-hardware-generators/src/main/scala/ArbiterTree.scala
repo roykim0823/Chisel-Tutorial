@@ -7,7 +7,7 @@ import chisel3.util._
 //
 // The base class only fixes the interface; a subclass supplies the 2:1
 // arbitration function and wires up the tree. Note that `gen` is a *private*
-// val for the reason spelled out in PortDemo.scala: a public Data-typed field
+// val for the reason spelled out in ParamBundle.scala: a public Data-typed field
 // would become an extra element of the surrounding Bundle.
 class Arbiter[T <: Data: Manifest](n: Int, private val gen: T) extends Module {
   val io = IO(new Bundle {

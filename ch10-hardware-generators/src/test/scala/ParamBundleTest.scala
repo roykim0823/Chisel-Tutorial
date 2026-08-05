@@ -6,7 +6,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 // Locks in the behaviour the README claims about parameterized Bundles. Most of
 // these need no simulator at all: the field list and the generated port names
 // are decided at elaboration time.
-class PortDemoTest extends AnyFlatSpec with ChiselScalatestTester {
+class ParamBundleTest extends AnyFlatSpec with ChiselScalatestTester {
 
   def fields(b: Bundle): Seq[String] = b.elements.keys.toSeq
 
@@ -64,24 +64,6 @@ class PortDemoTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.outPort(1).address.expect(10.U)
       dut.io.outPort(1).data.data.expect(111.U)
       dut.io.outPort(1).data.flag.expect(true.B)
-    }
-  }
-
-  // The two-parallel-vectors version routes the payload only; the address rides
-  // in its own vector.
-  "NocRouter" should "route a Payload with a separate address vector" in {
-    test(new NocRouter(new Payload, 2)) { dut =>
-      dut.io.inPort(0).data.poke(111.U)
-      dut.io.inPort(0).flag.poke(true.B)
-      dut.io.address(0).poke(10.U)
-      dut.io.inPort(1).data.poke(222.U)
-      dut.io.inPort(1).flag.poke(false.B)
-      dut.io.address(1).poke(20.U)
-
-      dut.io.outPort(0).data.expect(222.U)
-      dut.io.outPort(0).flag.expect(false.B)
-      dut.io.outPort(1).data.expect(111.U)
-      dut.io.outPort(1).flag.expect(true.B)
     }
   }
 }
