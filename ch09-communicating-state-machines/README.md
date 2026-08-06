@@ -360,7 +360,7 @@ $ sbt "runMain Generate"
 ```
 
 writes `Flasher.sv`, `Flasher2.sv`, `PopulationCount.sv`, and
-`ReadyValidBuffer.sv`.
+`ReadyValidBuffer.sv` into `generated/`.
 
 ---
 

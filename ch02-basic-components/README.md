@@ -711,8 +711,8 @@ object Generate extends App {
 $ sbt "runMain Generate"
 ```
 
-This writes **`Logic.sv`** and **`RegisterFile.sv`** into this folder. Open them
-and match the ports to the `io` bundles. In `RegisterFile.sv` you will see 32
+This writes **`generated/Logic.sv`** and **`generated/RegisterFile.sv`**. Open
+them and match the ports to the `io` bundles. In `RegisterFile.sv` you will see 32
 outputs `io_dbgPort_0 … io_dbgPort_31` — that is the debug `Vec` flattened into
 individual ports.
 

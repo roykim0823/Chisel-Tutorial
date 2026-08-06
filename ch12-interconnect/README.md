@@ -421,7 +421,7 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-emits `CounterDevice.sv` and `UseMemMappedRV.sv`.
+emits `CounterDevice.sv` and `UseMemMappedRV.sv` into `generated/`.
 
 ---
 

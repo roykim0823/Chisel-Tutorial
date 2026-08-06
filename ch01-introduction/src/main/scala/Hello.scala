@@ -33,7 +33,7 @@ class Hello extends Module {
 /**
  * An object extending App to generate the Verilog code.
  * Run with:  sbt "runMain Hello"
- * Produces:  Hello.v  in the current directory.
+ * Produces:  Hello.sv  in the current directory (Chisel 6 emits .sv).
  */
 object Hello extends App {
   emitVerilog(new Hello())
@@ -42,7 +42,7 @@ object Hello extends App {
 /**
  * Same as Hello, but writes the Verilog into a chosen output directory.
  * Run with:  sbt "runMain HelloOption"
- * Produces:  generated/Hello.v
+ * Produces:  generated/Hello.sv
  */
 object HelloOption extends App {
   emitVerilog(new Hello(), Array("--target-dir", "generated"))

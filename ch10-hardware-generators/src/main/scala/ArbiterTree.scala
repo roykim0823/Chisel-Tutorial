@@ -6,10 +6,12 @@ import chisel3.util._
 // TWO requests. The tree itself is generated, not written out by hand.
 //
 // The base class only fixes the interface; a subclass supplies the 2:1
-// arbitration function and wires up the tree. Note that `gen` is a *private*
-// val for the reason spelled out in ParamBundle.scala: a public Data-typed field
-// would become an extra element of the surrounding Bundle.
-class Arbiter[T <: Data: Manifest](n: Int, private val gen: T) extends Module {
+// arbitration function and wires up the tree. `gen` is a plain constructor
+// parameter, with no `val`: a Module does not reflect over its fields the way a
+// Bundle does, so the spelling makes no difference to the generated hardware
+// here. The book writes `private val gen: T`; see ParamBundle.scala for the
+// Bundle case, where public/private really does change the emitted Verilog.
+class Arbiter[T <: Data: Manifest](n: Int, gen: T) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Vec(n, new DecoupledIO(gen)))
     val out = new DecoupledIO(gen)
@@ -19,7 +21,7 @@ class Arbiter[T <: Data: Manifest](n: Int, private val gen: T) extends Module {
 // Only one input will be ready, as we cannot take two values in one cycle.
 // A shadow register would be a reasonable optimisation; without it one channel
 // can only take one data item every 2 clock cycles.
-class ArbiterTree[T <: Data: Manifest](n: Int, private val gen: T) extends Arbiter(n, gen) {
+class ArbiterTree[T <: Data: Manifest](n: Int, gen: T) extends Arbiter(n, gen) {
 
   // A FAIR 2:1 arbiter: a small state machine remembers whose turn it is. The
   // two idle states give each input a turn, the two "has" states hold data
@@ -72,7 +74,7 @@ class ArbiterTree[T <: Data: Manifest](n: Int, private val gen: T) extends Arbit
 
 // The same tree built from a PRIORITY 2:1 arbiter: input `a` always wins when
 // both are pending, so a busy high-priority input can starve the other one.
-class ArbiterSimpleTree[T <: Data: Manifest](n: Int, private val gen: T) extends Arbiter(n, gen) {
+class ArbiterSimpleTree[T <: Data: Manifest](n: Int, gen: T) extends Arbiter(n, gen) {
 
   // Assumes a requester holds `valid` until it is acknowledged by `ready`, and
   // that `ready` may be asserted one cycle after `valid` is seen. The winning

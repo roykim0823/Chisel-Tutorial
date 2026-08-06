@@ -244,7 +244,7 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-writes `Debounce.sv`, `DebounceFunc.sv`, and `SyncReset.sv`.
+writes `Debounce.sv`, `DebounceFunc.sv`, and `SyncReset.sv` into `generated/`.
 
 ---
 

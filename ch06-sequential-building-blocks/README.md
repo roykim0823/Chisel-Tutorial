@@ -590,7 +590,7 @@ $ sbt "runMain Generate"
 ```
 
 writes `Registers.sv`, `WhenCounter.sv`, `Timer.sv`, `Pwm.sv`,
-`ShiftRegister.sv`, `Memory.sv`, and `ForwardingMemory.sv`.
+`ShiftRegister.sv`, `Memory.sv`, and `ForwardingMemory.sv` into `generated/`.
 
 ---
 

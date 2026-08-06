@@ -244,7 +244,7 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-writes `SimpleFsm.sv`, `RisingFsm.sv`, and `RisingMooreFsm.sv`.
+writes `SimpleFsm.sv`, `RisingFsm.sv`, and `RisingMooreFsm.sv` into `generated/`.
 
 ---
 

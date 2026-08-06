@@ -328,7 +328,7 @@ Generate SystemVerilog (the `assert` is dropped in generation):
 $ sbt "runMain Generate"
 ```
 
-emits `Assert.sv` and `TickGenTestTop.sv`.
+emits `Assert.sv` and `TickGenTestTop.sv` into `generated/`.
 
 ---
 

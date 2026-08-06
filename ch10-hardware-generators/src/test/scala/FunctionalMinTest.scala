@@ -41,4 +41,58 @@ class FunctionalMinTest extends AnyFlatSpec with ChiselScalatestTester {
       d.io.resC.expect(1.U); d.io.idxC.expect(2.U)
     }
   }
+
+  // The four single-variant modules must agree with each other (and with the
+  // combined FunctionalMin above) - otherwise comparing their Verilog in
+  // FunctionalMinDemo is meaningless.
+  val variantData = Seq(3, 5, 1, 7)   // unique minimum 1 at index 2
+  val variantTie = Seq(1, 0, 3, 0)    // minimum 0 at index 1 AND index 3
+
+  "MinValueOnly" should "find the minimum value" in {
+    test(new MinValueOnly(variantData.length, 8)) { d =>
+      variantData.zipWithIndex.foreach { case (v, i) => d.io.in(i).poke(v.U) }
+      d.io.min.expect(1.U)
+    }
+  }
+
+  "MinBundle" should "find the minimum and its index" in {
+    test(new MinBundle(variantData.length, 8)) { d =>
+      variantData.zipWithIndex.foreach { case (v, i) => d.io.in(i).poke(v.U) }
+      d.io.min.expect(1.U)
+      d.io.idx.expect(2.U)
+    }
+  }
+
+  "MinTuple" should "find the minimum and its index" in {
+    test(new MinTuple(variantData.length, 8)) { d =>
+      variantData.zipWithIndex.foreach { case (v, i) => d.io.in(i).poke(v.U) }
+      d.io.min.expect(1.U)
+      d.io.idx.expect(2.U)
+    }
+  }
+
+  "MinMixedVec" should "find the minimum and its index" in {
+    test(new MinMixedVec(variantData.length, 8)) { d =>
+      variantData.zipWithIndex.foreach { case (v, i) => d.io.in(i).poke(v.U) }
+      d.io.min.expect(1.U)
+      d.io.idx.expect(2.U)
+    }
+  }
+
+  // The chain (c) and the trees (b)/(d) associate the comparisons differently,
+  // yet a strict `<` makes the LAST minimum win in either shape.
+  "all three index variants" should "report the last index on a tie" in {
+    test(new MinBundle(variantTie.length, 8)) { d =>
+      variantTie.zipWithIndex.foreach { case (v, i) => d.io.in(i).poke(v.U) }
+      d.io.idx.expect(3.U)
+    }
+    test(new MinTuple(variantTie.length, 8)) { d =>
+      variantTie.zipWithIndex.foreach { case (v, i) => d.io.in(i).poke(v.U) }
+      d.io.idx.expect(3.U)
+    }
+    test(new MinMixedVec(variantTie.length, 8)) { d =>
+      variantTie.zipWithIndex.foreach { case (v, i) => d.io.in(i).poke(v.U) }
+      d.io.idx.expect(3.U)
+    }
+  }
 }

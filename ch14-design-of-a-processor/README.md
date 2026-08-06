@@ -721,7 +721,7 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-emits `AluAccu.sv`, `Decode.sv`, and `DataMem.sv`.
+emits `AluAccu.sv`, `Decode.sv`, and `DataMem.sv` into `generated/`.
 
 ---
 

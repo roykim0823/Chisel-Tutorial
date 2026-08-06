@@ -450,8 +450,8 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-emits `ThreeCats.sv` (the **complete 3-stage CPU** — ~500 lines of
-SystemVerilog), `Csr.sv`, `InstructionROM.sv`, `AluModule.sv`, and
+emits, into `generated/`, `ThreeCats.sv` (the **complete 3-stage CPU** — ~500
+lines of SystemVerilog), `Csr.sv`, `InstructionROM.sv`, `AluModule.sv`, and
 `DecodeModule.sv`. That the whole pipelined core elaborates to Verilog is the
 headline result of this chapter.
 

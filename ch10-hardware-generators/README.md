@@ -23,9 +23,9 @@ ch10-hardware-generators/
 ├── src/main/scala/
 │   ├── FunctionalComp.scala a function returning two values in a tuple
 │   ├── FunctionalAdd.scala  summing a Vec with reduce/reduceTree
-│   ├── FunctionalMin.scala  min-search four ways (+ a pure-Scala reference model)
-│   ├── MinVariants.scala    those four again, one module each, to compare their Verilog
-│   ├── MinDemo.scala        emits and measures the four (sbt "runMain MinDemo")
+│   ├── FunctionalMin.scala  min-search four ways, a pure-Scala reference model,
+│   │                        the four split one per module (+ FunctionalMinDemo:
+│   │                        emits and measures them)
 │   ├── BcdTable.scala      binary -> BCD table generated with a Scala loop
 │   ├── GenHardware.scala   VecInit ROM tables (a string, a square table)
 │   ├── ParamAdder.scala    width parameter + two instances
@@ -37,7 +37,8 @@ ch10-hardware-generators/
 │   ├── Ticker.scala         abstract base + three implementations (inheritance)
 │   ├── ArbiterTree.scala    reduceTree arbitration tree: fair and priority 2:1
 │   └── Generate.scala      emits .sv for every design, or just the ones you name
-└── src/test/scala/  (one test per topic)
+└── src/test/scala/  (one test per topic, plus ArbiterWaveTest:
+                     records .vcd waveforms for the two arbiters)
 ```
 
 ---
@@ -360,13 +361,13 @@ Two differently-sized adders then come from the same generator — inside
 stays in the generated code (`parameter WIDTH = 8`, a VHDL generic) and the
 *downstream* tool specializes it. Chisel resolves it first: each distinct
 argument elaborates its own concrete module, and the emitted SystemVerilog
-contains no `n` anywhere. Generate it and look at the top of `UseAdder.sv`
-(comments trimmed):
+contains no `n` anywhere. Generate it and look at the top of
+`generated/UseAdder.sv` (comments trimmed):
 
 ```
 $ sbt "runMain Generate UseAdder"
 ...
-emitting UseAdder.sv
+emitting generated/UseAdder.sv
 ```
 
 Run bare, `Generate` emits every design in the chapter; naming one keeps the
@@ -1164,24 +1165,36 @@ $ sbt "testOnly FunctionalMinTest"
 [info] - should give the last index in hardware and the first in the model
 [info] FunctionalMin
 [info] - should find the min value and its index
-[info] Tests: succeeded 3, failed 0, canceled 0, ignored 0, pending 0
+[info] MinValueOnly
+[info] - should find the minimum value
+[info] MinBundle
+[info] - should find the minimum and its index
+[info] MinTuple
+[info] - should find the minimum and its index
+[info] MinMixedVec
+[info] - should find the minimum and its index
+[info] all three index variants
+[info] - should report the last index on a tie
+[info] Tests: succeeded 8, failed 0, canceled 0, ignored 0, pending 0
 ```
 
-The middle case is the tie caveat above, pinned as a test: it asserts index 4 from
+The second case is the tie caveat above, pinned as a test: it asserts index 4 from
 all three hardware variants and index 1 from the model, so if a future edit
-changes either comparison the bench says so.
+changes either comparison the bench says so. The last five cases belong to the
+split-out variants of the next section.
 
 #### Comparing the four in generated Verilog
 
 Four spellings that compute the same thing raise the obvious question: do they
 build the same *circuit*? `FunctionalMin` can't answer it — it elaborates all four
-at once, so its Verilog is one tangle. `src/main/scala/MinVariants.scala` therefore
-carries each variant again as its own small module (`MinValueOnly`, `MinBundle`,
-`MinTuple`, `MinMixedVec`), and `MinDemo` emits and measures each:
+at once, so its Verilog is one tangle. The rest of
+`src/main/scala/FunctionalMin.scala` therefore carries each variant again as its
+own small module (`MinValueOnly`, `MinBundle`, `MinTuple`, `MinMixedVec`), and
+the `FunctionalMinDemo` app at the end of that file emits and measures each:
 
 ```
-$ sbt "runMain MinDemo"        # 4 inputs, the default
-$ sbt "runMain MinDemo 8"      # 8 inputs
+$ sbt "runMain FunctionalMinDemo"        # 4 inputs, the default
+$ sbt "runMain FunctionalMinDemo 8"      # 8 inputs
 ```
 
 For four 8-bit inputs, variant **(a)** is the baseline — no index to carry, so it
@@ -1321,7 +1334,7 @@ values takes `n-1` comparisons however you associate them. What changes is
 
 At `n = 8` the chain is seven compare-and-select stages back to back — one
 critical path through all of them — where the trees are three levels. `sbt
-"runMain MinDemo 8"` prints it plainly: `_resFun_T_2` → `_T_6` → `_T_10` → `_T_14`
+"runMain FunctionalMinDemo 8"` prints it plainly: `_resFun_T_2` → `_T_6` → `_T_10` → `_T_14`
 → `_T_18` → `_T_22` → `_T_25` → `io_min`, each waiting on the last.
 
 That is the practical takeaway of [§10.6](#106-functional-programming): the
@@ -1330,9 +1343,10 @@ computed in, and the container decides which folds you are allowed to use. Where
 `reduceTree` is available, prefer it — and `MixedVec` is the way to keep it
 available when an index has to ride along.
 
-`src/test/scala/MinVariantsTest.scala` keeps the four honest: each finds minimum
-`1` at index `2` in `Seq(3, 5, 1, 7)`, and all three index variants agree on the
-tie rule (last index) despite the different associativity.
+The second half of `src/test/scala/FunctionalMinTest.scala` keeps the four
+honest: each finds minimum `1` at index `2` in `Seq(3, 5, 1, 7)`, and all three
+index variants agree on the tie rule (last index) despite the different
+associativity.
 
 ### 10.6.2 An arbitration tree
 
@@ -1342,7 +1356,7 @@ A base class fixes the interface: the input is a `Vec` of ready/valid
 
 `src/main/scala/ArbiterTree.scala`
 ```scala
-class Arbiter[T <: Data: Manifest](n: Int, private val gen: T) extends Module {
+class Arbiter[T <: Data: Manifest](n: Int, gen: T) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Vec(n, new DecoupledIO(gen)))
     val out = new DecoupledIO(gen)
@@ -1350,9 +1364,19 @@ class Arbiter[T <: Data: Manifest](n: Int, private val gen: T) extends Module {
 }
 ```
 
-(`gen` is a `private val` for exactly the reason given under
-[§10.4.5](#1045-parameterized-bundles) — a public `Data`-typed field
-would become a stray element of the surrounding `Bundle`.)
+The book writes `private val gen: T` here. This chapter keeps the plain
+parameter, because for a **`Module`** the `val` changes nothing: a `Module` does
+not build its port list by reflecting over its fields, so all three spellings —
+no `val`, `private val`, `val` — emit byte-identical SystemVerilog. (Verified by
+generating `ArbiterTree.sv` each way and diffing.) It is only for a **`Bundle`**
+that the spelling matters, and that is the lesson of
+[§10.4.5](#1045-parameterized-bundles): there, a public `Data`-typed field
+really does become a stray element of the `Bundle`.
+
+One footnote if you try it: making `gen` a *public* `val` here does not compile,
+because `ArbiterTree` and `ArbiterSimpleTree` would each redeclare a member the
+base class already defines (`` `override` modifier required ``). That is plain
+Scala inheritance, not a Chisel rule.
 
 A subclass then supplies a function that arbitrates between exactly two
 requests, and reduces the whole `Vec` with it — that single line *is* the tree:
@@ -1373,17 +1397,39 @@ All that is left is to write the 2:1 arbitration function itself.
 > the internal registers are shown too, since each one is observable from the
 > ports (`in(0).ready` *is* `regReadyA`, `out.bits` *is* `regData`, `out.valid`
 > is `!regEmpty`, and the fair arbiter's `regState` follows uniquely from
-> `ready`/`valid`/`bits`). You can reproduce them with `WriteVcdAnnotation`
-> (Chapter 3) and GTKWave.
+> `ready`/`valid`/`bits`). To get the real trace rather than this rendering, run
+> `sbt "testOnly ArbiterWaveTest"` — see
+> [Recording your own waveforms](#recording-your-own-waveforms) at the end of
+> this section.
 
 #### Simple Arbitration
 
-The combinational priority arbiter from earlier chapters can't be reused
-directly here: with a ready/valid interface, a combinational path from
-`ready` to `valid` isn't allowed, so the winning request's data must be
-**registered**. The following 2:1 arbitration function assumes a requester
-holds `valid` until it is read (acknowledged by `ready`), and that `ready`
-can be asserted one cycle after `valid` is seen:
+The arbiter meant by "the arbiter of the earlier chapter" is the one from
+[§5.4 Arbiter](../ch05-combinational-building-blocks/README.md#54-arbiter) —
+`Arbiter3` / `Arbiter3Loop`, which take a `request` bit vector straight to a
+`grant` bit vector, lower index wins. That circuit is **purely combinational**:
+no registers, the grant is a function of the request in the same cycle.
+
+It cannot be reused here, because the ports of this arbiter are not raw
+request/grant bits but **ready/valid handshakes**
+([§9.3](../ch09-communicating-state-machines/README.md#93-the-readyvalid-interface)),
+and the handshake forbids a combinational path from `ready` back to `valid`. A
+combinational grant would be exactly that path — `out.ready` would feed
+`in.ready`, which the producer may use to compute `valid` — and stacking such
+nodes into a tree would build one long combinational chain, or a loop. So the
+decision has to be **registered**, which means this arbiter needs state.
+
+That state comes with two assumptions about the protocol, which the function
+below relies on:
+
+1. a requester that has asserted `valid` holds it until the receiver takes the
+   word (signals `ready`) — it may not withdraw a request;
+2. `ready` may be asserted in the clock cycle *after* the one in which `valid`
+   was seen.
+
+This is one specific interpretation of the ready/valid protocol — the same one
+used by **AXI**. Other interpretations exist, which is why the book spells this
+one out before the code:
 
 `src/main/scala/ArbiterTree.scala`
 ```scala
@@ -1426,17 +1472,71 @@ can be asserted one cycle after `valid` is seen:
 
 ```
 
-Four registers do the work: `regData` holds the output data, `regEmpty`
-flags that the data register is empty, and `regReadyA`/`regReadyB` are the
-registered `ready` signals for the two inputs. When the data register is
-empty and one input is `valid`, `ready` is asserted (registered) for *that*
-input only — there is just one data register, so only one input can be
-accepted at a time. Once a registered `ready` fires, the input is still
-assumed `valid`, so its data is captured, `regEmpty` is cleared, and the
-`ready` flag resets. The output is `valid` whenever the data register is not
-empty; once the receiver asserts `ready`, the register empties again. Note
-this always favors input `a` when both are pending — it is a **priority**
-arbiter, not a fair one.
+**The shape of it.** Ignore the arbitration for a second and this is the
+one-word buffer of [§9.3](../ch09-communicating-state-machines/README.md#93-the-readyvalid-interface):
+one data register plus an "empty" flag, `DecoupledIO` on each side. The
+arbitration is a *front door* bolted onto that buffer — two inputs competing
+for one slot, and a registered grant deciding who gets it.
+
+Four registers, two jobs:
+
+| register | job |
+|---|---|
+| `regData` | the one storage slot — the word being passed along |
+| `regEmpty` | is the slot free? (`out.valid` is just `!regEmpty`) |
+| `regReadyA` | input `a` has been *promised* the slot; it is `a.ready` |
+| `regReadyB` | the same for input `b` |
+
+Note that `regReadyA`/`regReadyB` **are** the `ready` outputs — `a.ready :=
+regReadyA` — which is what "registering the decision" means concretely. The
+grant is decided one cycle, then presented the next.
+
+**Each word travels through three phases.** Follow one word from input `a`:
+
+1. **Decide.** The slot is free and `a` is asking, so promise it to `a`:
+   ```scala
+   when (a.valid & regEmpty & !regReadyB) { regReadyA := true.B }
+   ```
+   The `!regReadyB` guard is what keeps the promise exclusive — there is only
+   one slot, so at most one input may hold a grant at a time.
+
+2. **Capture.** Next cycle `a.ready` is high. Assumption 1 above guarantees `a`
+   is still holding `valid` with the same `bits`, so the word can simply be
+   taken: store it, mark the slot full, and drop the grant.
+   ```scala
+   when (regReadyA) { regData := a.bits; regEmpty := false.B; regReadyA := false.B }
+   ```
+
+3. **Hand over.** With the slot full, `out.valid` is high and `out.bits` is the
+   stored word. When the consumer answers with `out.ready`, the slot frees up
+   and the cycle can start again:
+   ```scala
+   out.valid := !regEmpty
+   when (out.ready) { regEmpty := true.B }
+   ```
+
+**One subtlety worth pausing on.** In the capture cycle, `regEmpty` is *still*
+`1` (it only clears at the end of that cycle), so the phase-1 `when` fires
+again and re-asserts `regReadyA := true.B`. The phase-2 block then assigns
+`regReadyA := false.B`. Both assignments happen in the same cycle — and the
+**last connection wins** in Chisel, so `false` is the one that takes effect and
+the grant correctly drops. That rule is what makes reading these `when` chains
+top-to-bottom work: later statements override earlier ones.
+
+**Why it is a *priority* arbiter.** The decision is a single `when`/`.elsewhen`
+chain that tests `a` first:
+
+*illustrative — the decision, condensed*
+```scala
+when (a.valid & regEmpty & !regReadyB) { regReadyA := true.B }
+.elsewhen (b.valid & regEmpty & !regReadyA) { regReadyB := true.B }
+```
+
+Whenever the slot is free and `a` is asking, the first branch is taken and the
+`.elsewhen` is never evaluated. Input `a` always wins, so a busy `a` starves
+`b` completely — exactly what the waveform below shows, and what the fair
+version in the next subsection fixes by adding state that remembers whose turn
+it is.
 
 **Cycle by cycle.** Both inputs request forever (`a` sends `1`, `b` sends `2`,
 both hold `valid` high), and the consumer plays a correct handshake: it asserts
@@ -1619,6 +1719,72 @@ concrete, and the tests assert exactly it:
 > pulses every second cycle rather than every fourth: the arbiter thinks it is
 > empty and keeps re-accepting `a`.
 
+#### Recording your own waveforms
+
+The diagrams above are drawn in the README, but you can produce the real thing —
+a `.vcd` you can scrub through in a waveform viewer — straight from sbt.
+`src/test/scala/ArbiterWaveTest.scala` attaches chiseltest's
+`WriteVcdAnnotation` (the idiom from
+[Chapter 3](../ch03-build-and-testing/README.md)) to eight scenarios, pairing the
+**same stimulus** across the priority and the fair arbiter so the two can be put
+side by side:
+
+```
+$ sbt "testOnly ArbiterWaveTest"
+[wave] priority, both requesting  -> List(1, 1, 1, 1, 1, 1, 1, 1)
+[wave] fair, both requesting      -> List(1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2)
+[wave] priority, only b requesting-> List(2, 2, 2, 2, 2, 2, 2, 2)
+[wave] fair, only b requesting    -> List(2, 2, 2, 2, 2, 2, 2, 2)
+[wave] priority, slow consumer    -> List(1, 1, 1, 1, 1, 1)
+[wave] fair, slow consumer        -> List(1, 2, 1, 2, 1, 2, 1, 2)
+[wave] priority, 4-input tree     -> List(1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3)
+[wave] fair, 4-input tree         -> List(3, 1, 4, 2, 3, 1, 4, 2, 3, 1, 4, 2, 3, 1, 4)
+[info] Tests: succeeded 8, failed 0, canceled 0, ignored 0, pending 0
+```
+
+Those eight lines are the whole section in miniature. Input *i* sends the value
+*i+1*, and the consumer is correct by construction — it asserts `ready` only in
+a cycle in which it sees `valid`:
+
+| scenario | priority (`ArbiterSimpleTree`) | fair (`ArbiterTree`) |
+|---|---|---|
+| both inputs requesting | `1,1,1,…` — `b` never wins | `1,2,1,2,…` — strict alternation |
+| only `b` requesting | `2,2,2,…` — served fine | `2,2,2,…` |
+| slow consumer (takes every 4th word) | `1,1,1,…` | `1,2,1,2,…` |
+| 4-input tree, all requesting | `1,3,1,3,…` — inputs 1 and 3 starve | `3,1,4,2,…` — all four |
+
+The second row is worth dwelling on: **priority is not the same as starvation.**
+With `a` idle, the low-priority input is served at full rate; `b` only loses when
+it is actually competing.
+
+Each test writes its own file under `test_run_dir/`:
+
+```
+test_run_dir/priority_2to1_both_requesting_should_record_a_waveform_showing_b_starved/ArbiterSimpleTree.vcd
+test_run_dir/fair_2to1_both_requesting_should_record_a_waveform_showing_alternation/ArbiterTree.vcd
+test_run_dir/priority_2to1_only_b_requesting_should_record_a_waveform_showing_b_served/ArbiterSimpleTree.vcd
+test_run_dir/fair_2to1_only_b_requesting_should_record_a_waveform_showing_b_served/ArbiterTree.vcd
+test_run_dir/priority_2to1_slow_consumer_should_record_a_waveform_with_backpressure/ArbiterSimpleTree.vcd
+test_run_dir/fair_2to1_slow_consumer_should_record_a_waveform_with_backpressure/ArbiterTree.vcd
+test_run_dir/priority_4input_tree_should_record_a_waveform_of_the_whole_tree/ArbiterSimpleTree.vcd
+test_run_dir/fair_4input_tree_should_record_a_waveform_of_the_whole_tree/ArbiterTree.vcd
+```
+
+Open one with GTKWave (or Surfer):
+
+```
+$ gtkwave test_run_dir/fair_2to1_both_requesting_should_record_a_waveform_showing_alternation/ArbiterTree.vcd
+```
+
+The dump includes the **internal registers**, not just the ports — the fair
+arbiter's `io_out_regState` and the priority arbiter's `regEmpty` /
+`regReadyA` / `regReadyB` are all there, so the three phases described above can
+be followed signal by signal. (`test_run_dir/` is in `.gitignore`, so the traces
+stay local.)
+
+To add a scenario of your own, copy one of the eight tests and change the
+`requesting` set or `acceptEvery`; the helper drives the rest.
+
 ---
 
 ## 10.7 Build, run, and check
@@ -1627,14 +1793,18 @@ concrete, and the tests assert exactly it:
 $ sbt test
 ```
 
-Expected tail (39 tests across 13 suites):
+Expected tail (47 tests across 13 suites):
 
 ```
-[info] Total number of tests run: 39
+[info] Total number of tests run: 47
 [info] Suites: completed 13, aborted 0
-[info] Tests: succeeded 39, failed 0, canceled 0, ignored 0, pending 0
+[info] Tests: succeeded 47, failed 0, canceled 0, ignored 0, pending 0
 [info] All tests passed.
 ```
+
+Note that `sbt test` also runs `ArbiterWaveTest`, which leaves eight `.vcd`
+traces under `test_run_dir/` — see
+[Recording your own waveforms](#recording-your-own-waveforms).
 
 Generate SystemVerilog:
 
@@ -1642,11 +1812,36 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-emits `BcdTable.sv`, `GenHardware.sv`, `UseAdder.sv`, `ParamFunc.sv`,
-`FunctionalMin.sv`, `UpTicker.sv`, `ArbiterTree.sv` (the generated 4:1
-arbitration tree), `UseParamRouter.sv` / `UseParamRouter2.sv` (the two
-type-parameterized routers), and `RegisterFile.sv` (built with `debug = false`,
-so with no debug port).
+emits ten files **into `generated/`**: `BcdTable.sv`, `GenHardware.sv`,
+`UseAdder.sv`, `ParamFunc.sv`, `FunctionalMin.sv`, `UpTicker.sv`,
+`ArbiterTree.sv` (the generated 4:1 arbitration tree), `UseParamRouter.sv` /
+`UseParamRouter2.sv` (the two type-parameterized routers), and `RegisterFile.sv`
+(built with `debug = false`, so with no debug port).
+
+**Where the output goes.** `emitVerilog` would drop every file in the project
+root; `Generate` passes `--target-dir` so they are collected in one folder
+instead:
+
+`src/main/scala/Generate.scala`
+```scala
+  val targetDir = "generated"
+  val opts = Array("--target-dir", targetDir)
+```
+
+The second argument of `emitVerilog` is handed straight to the Chisel/CIRCT
+command line, so this is the same `--target-dir` the standalone `ChiselMain`
+entry point takes (below). The directory is created on demand and is listed in
+`.gitignore`, together with the two directories sbt and chiseltest create:
+
+| directory | who writes it | what is in it |
+|---|---|---|
+| `generated/` | `Generate` | the emitted `.sv` files — the output you actually want |
+| `target/` | sbt | compiled classes (`target/scala-2.13/classes`), test classes, the packaged jar, incremental-compile state (`zinc`), and JUnit XML test reports |
+| `project/target/` | sbt | the same, for the *build definition* itself (`project/build.properties`) |
+| `test_run_dir/` | chiseltest | one subdirectory per test case, holding the FIRRTL the simulator ran (`<Module>.lo.fir`) and any `.vcd` written with `WriteVcdAnnotation` |
+
+All four are disposable: delete them and the next `sbt` run rebuilds what it
+needs. `make clean` at the repo root removes all of them for every chapter.
 
 **Emitting just one design.** All ten at once is rarely what you want. Pass a
 name and only that design is elaborated:
@@ -1654,7 +1849,7 @@ name and only that design is elaborated:
 ```
 $ sbt "runMain Generate UseAdder"
 ...
-emitting UseAdder.sv
+emitting generated/UseAdder.sv
 ```
 
 Several names work as well, and `list` prints the available ones:
@@ -1662,8 +1857,8 @@ Several names work as well, and `list` prints the available ones:
 ```
 $ sbt "runMain Generate UseAdder ParamFunc"
 ...
-emitting UseAdder.sv
-emitting ParamFunc.sv
+emitting generated/UseAdder.sv
+emitting generated/ParamFunc.sv
 ```
 
 ```
@@ -1746,7 +1941,7 @@ one module at a time and reports the size of each (also no `.sv` files — it pr
 to stdout). It takes the vector length as an optional argument:
 
 ```
-$ sbt "runMain MinDemo 8"
+$ sbt "runMain FunctionalMinDemo 8"
 ...
 === summary ===
 (a) MinValueOnly  re   comparators:  7   muxes:  7   wires:  6

@@ -231,9 +231,25 @@ A top-level `Makefile` drives every chapter:
 ```
 $ make test          # run `sbt test` in every chapter
 $ make test CH=ch08-finite-state-machines   # just one chapter
-$ make clean         # remove all build artifacts (target/, *.sv, test_run_dir/, ...)
+$ make clean         # remove all build artifacts (target/, generated/, test_run_dir/, ...)
 $ make list          # list the chapter folders
 ```
+
+### Where the output goes
+
+Each chapter writes into three throwaway directories, all of them in
+`.gitignore` and all removed by `make clean`:
+
+| directory | who writes it | what is in it |
+|---|---|---|
+| `generated/` | `sbt "runMain Generate"` | the emitted **`.sv`** files |
+| `target/`, `project/target/` | sbt | compiled classes, the packaged jar, incremental-compile state, JUnit test reports |
+| `test_run_dir/` | chiseltest | one subdirectory per test case, with the FIRRTL the simulator ran and any `.vcd` waveform |
+
+Chisel's own default output directory is the project root (`--target-dir`
+defaults to `.`); each chapter's `Generate.scala` passes
+`Array("--target-dir", "generated")` so the emitted files are collected in one
+folder instead of scattered next to `build.sbt`.
 
 Continuous integration (GitHub Actions, `.github/workflows/test.yml`) runs
 `make test` on every push.

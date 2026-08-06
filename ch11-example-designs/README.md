@@ -363,7 +363,8 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-emits `BubbleFifo.sv`, `MemFifo.sv`, `DoubleBufferFifo.sv`, and `Sender.sv`.
+emits `BubbleFifo.sv`, `MemFifo.sv`, `DoubleBufferFifo.sv`, and `Sender.sv`
+into `generated/`.
 
 ---
 

@@ -19,7 +19,7 @@ ch04-components/
 ├── figures/                        chapter diagrams (PNG)
 ├── src/main/scala/
 │   ├── components.scala            all modules of the chapter
-│   └── Generate.scala              emits Count10.sv and Alu.sv
+│   └── Generate.scala              emits generated/{Count10,Alu,Processor6}.sv
 └── src/test/scala/
     └── ComponentsTest.scala        checks Count10 and the Alu
 ```
@@ -454,7 +454,8 @@ Expected output:
 $ sbt "runMain Generate"
 ```
 
-Writes `Count10.sv`, `Alu.sv`, and `Processor6.sv`. In `Count10.sv` the module
+Writes `Count10.sv`, `Alu.sv`, and `Processor6.sv` into `generated/`. In
+`Count10.sv` the module
 has an `output [7:0] io_dout` plus the implicit `clock`/`reset`; in `Alu.sv` the
 `switch` becomes a multiplexer indexed by `io_fn` (`assign io_y = _GEN[io_fn]`).
 `Processor6.sv` shows the payoff of a purely-combinational, constant-fed

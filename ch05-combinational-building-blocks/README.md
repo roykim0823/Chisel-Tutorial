@@ -22,7 +22,7 @@ ch05-combinational-building-blocks/
 │   ├── EncDec.scala          decoder + encoder (+ generated 16-bit encoder)
 │   ├── arbiter.scala         3 arbiter styles (manual, table, generator loop)
 │   ├── Comparator.scala      equal / greater-than
-│   └── Generate.scala        emits EncDec.sv, Arbiter3Loop.sv, Comparator.sv
+│   └── Generate.scala        emits generated/{EncDec,Arbiter3Loop,Comparator}.sv
 └── src/test/scala/
     ├── CombinationalTest.scala
     ├── EncDecTest.scala
@@ -453,7 +453,7 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-writes `EncDec.sv`, `Arbiter3Loop.sv`, and `Comparator.sv`.
+writes `EncDec.sv`, `Arbiter3Loop.sv`, and `Comparator.sv` into `generated/`.
 
 ---
 
