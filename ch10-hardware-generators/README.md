@@ -36,9 +36,11 @@ ch10-hardware-generators/
 │   ├── RegisterFile.scala   optional debug port via Scala's Option
 │   ├── Ticker.scala         abstract base + three implementations (inheritance)
 │   ├── ArbiterTree.scala    reduceTree arbitration tree: fair and priority 2:1
+│   ├── ArbiterVariants.scala  the same arbiter written three other ways, to
+│   │                        study whether `when` order matters (+ its emitter)
 │   └── Generate.scala      emits .sv for every design, or just the ones you name
-└── src/test/scala/  (one test per topic, plus ArbiterWaveTest:
-                     records .vcd waveforms for the two arbiters)
+└── src/test/scala/  (one test per topic, plus ArbiterWaveTest: records .vcd
+                     waveforms, and ArbiterOrderTest: does `when` order matter?)
 ```
 
 ---
@@ -993,6 +995,7 @@ Naming that function is optional. The combining function can be written straight
 into the call as an anonymous **function literal** — parameters in parentheses,
 then `=>`, then the body:
 
+*illustrative — the shape of a function literal*
 ```scala
 // (param) => function body
 val sumLiteral = vec.reduce((a: UInt, b: UInt) => a + b)
@@ -1002,6 +1005,7 @@ Filled in for the adder above, the parameters are the two operands and the body
 is their sum, so the literal reads `(a: UInt, b: UInt) => a + b` and the whole
 `add` definition disappears into the `reduce` call:
 
+`src/main/scala/FunctionalAdd.scala`
 ```scala
   val sumLiteral = vec.reduce((a: UInt, b: UInt) => a + b)
 ```
@@ -1010,6 +1014,7 @@ When the parameters are used once each, in order, Scala's `_` wildcard can stand
 in for them and the types are inferred from the collection — which collapses the
 literal to just the operator:
 
+`src/main/scala/FunctionalAdd.scala`
 ```scala
   val sum = vec.reduceTree(_ + _)
 ```
@@ -1090,10 +1095,17 @@ The second way uses Scala **tuples** + `zipWithIndex` and avoids declaring a
       Mux(x._1 < y._1, x._2, y._2)))
 ```
 
+Read it as a **chain of functions** — `zipWithIndex`, then `map`, then
+`reduce` — each one feeding the next. Chaining functions this way is a typical
+functional-programming pattern, and can equally be read as a pipeline of
+operations on the collection.
+
 Here `zipWithIndex` turns the `Vec[UInt]` into a Scala `Vector` of tuples
-`(UInt, Int)`; the result is *still* a Scala `Vector`, not a Chisel `Vec` —
-so it must use `reduce`, **not** `reduceTree`, which only exists on Chisel's
-`Vec`.
+`(UInt, Int)`. (In general, `zip` merges two sequences into a single one whose
+elements are pairs; `zipWithIndex` is the special case that pairs each element
+with its own position.) The result is *still* a Scala `Vector`, not a Chisel
+`Vec` — so it must use `reduce`, **not** `reduceTree`, which only exists on
+Chisel's `Vec`.
 
 **Why the comparison appears twice.** That `reduce` looks redundant — the same
 `x._1 < y._1` written in both muxes — but it has to be. A Scala tuple is not
@@ -1136,6 +1148,13 @@ two-element `MixedVec`, indexed like an ordinary `Vec` — `(0)` is the value an
   io.resC := resFun2(0)
   io.idxC := resFun2(1)
 ```
+
+There is a second benefit, and it is the reason (d) is more than (c) with
+different syntax: a `MixedVec` **is** Chisel `Data`, so a single `Mux` selects
+the whole pair — where the Scala tuple of (c) needed one `Mux` per field. (d)
+recovers the property (b) had and (c) lost. The measured mux counts
+[below](#comparing-the-four-in-generated-verilog) show it: at `n = 4`, (b) and
+(d) use 4 muxes where (c) uses 5; at `n = 8`, 10 against 13.
 
 The value-and-index variants (b), (c) and (d) each drive their own pair of
 outputs, so one test can confirm all of them agree. And since the whole thing is a *search*, it has
@@ -1288,10 +1307,10 @@ two inner ops are independent and settle in parallel.
 To be sure the tuple is not the culprit, take variant (b)'s `Bundle` unchanged and
 swap only the fold:
 
+*illustrative — a control experiment, not part of the project*
 ```scala
   val res = vecTwo.reduce((x, y) => Mux(x.v < y.v, x, y))   // reduce, not reduceTree
 ```
-*illustrative — a control experiment, not part of the project*
 
 That emits (c)'s chain exactly — sequential `_res_T` → `_res_T_2` → `_res_T_4`, and
 the same nested index mux — from a `Bundle`:
@@ -1351,46 +1370,77 @@ associativity.
 ### 10.6.2 An arbitration tree
 
 `reduceTree` also builds an arbitration tree out of nothing but 2:1 arbiters.
-A base class fixes the interface: the input is a `Vec` of ready/valid
-(`DecoupledIO`) interfaces, the output a single ready/valid interface.
+One class holds the whole generator: the interface — a `Vec` of ready/valid
+(`DecoupledIO`) inputs reduced to a single ready/valid output — and the one line
+that turns a 2:1 arbitration function into an `n`-input tree.
 
 `src/main/scala/ArbiterTree.scala`
 ```scala
-class Arbiter[T <: Data: Manifest](n: Int, gen: T) extends Module {
+class Arbiter[T <: Data: Manifest](
+    n: Int,
+    gen: T,
+    arbitrate: (DecoupledIO[T], DecoupledIO[T]) => DecoupledIO[T]
+) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Vec(n, new DecoupledIO(gen)))
     val out = new DecoupledIO(gen)
   })
+
+  io.out <> io.in.reduceTree((a, b) => arbitrate(a, b))
 }
 ```
 
-The book writes `private val gen: T` here. This chapter keeps the plain
-parameter, because for a **`Module`** the `val` changes nothing: a `Module` does
-not build its port list by reflecting over its fields, so all three spellings —
-no `val`, `private val`, `val` — emit byte-identical SystemVerilog. (Verified by
-generating `ArbiterTree.sv` each way and diffing.) It is only for a **`Bundle`**
-that the spelling matters, and that is the lesson of
-[§10.4.5](#1045-parameterized-bundles): there, a public `Data`-typed field
-really does become a stray element of the `Bundle`.
+That last line *is* the tree. Everything specific to *how* two requests are
+arbitrated arrives as `arbitrate` — an ordinary function value — so one class
+covers both arbiters:
 
-One footnote if you try it: making `gen` a *public* `val` here does not compile,
-because `ArbiterTree` and `ArbiterSimpleTree` would each redeclare a member the
-base class already defines (`` `override` modifier required ``). That is plain
-Scala inheritance, not a Chisel rule.
+*illustrative*
+```scala
+new Arbiter(4, UInt(8.W), arbitrateSimp)   // priority
+new Arbiter(4, UInt(8.W), arbitrateFair)   // fair
+```
 
-A subclass then supplies a function that arbitrates between exactly two
-requests, and reduces the whole `Vec` with it — that single line *is* the tree:
+and the two named trees are nothing but the base class with one function
+plugged in:
 
 `src/main/scala/ArbiterTree.scala`
 ```scala
-  io.out <> io.in.reduceTree((a, b) => arbitrateSimp(a, b))
+class ArbiterSimpleTree[T <: Data: Manifest](n: Int, gen: T)
+  extends Arbiter(n, gen, arbitrateSimp[T])
+
+class ArbiterTree[T <: Data: Manifest](n: Int, gen: T)
+  extends Arbiter(n, gen, arbitrateFair[T])
 ```
 
-All that is left is to write the 2:1 arbitration function itself.
+> **`: Manifest` — inherited, and not needed here.** The context bound comes
+> straight from the book's `Arbiter`, where it supports a hand-written tree
+> helper built on Scala arrays. Nothing in this chapter's version uses it:
+> deleting it from all three classes still compiles and passes the tests.
+> It is kept so the class matches the book's listing.
 
-> **About the waveforms below.** The book has no timing diagram for the
-> arbiters, but the two versions are much easier to tell apart when you watch
-> them cycle by cycle. Each diagram below shows **one 2:1 node** (an
+> **A note on the arrangement.** The book defines each arbitration function
+> *inside* its own subclass of `Arbiter` and repeats the `reduceTree` line in
+> both. This chapter instead keeps the two functions together in an
+> `Arbitration` object and passes one in, which says the same thing more
+> directly — the combining function is a value, and it is the only difference
+> between the two arbiters — and keeps the tree line in exactly one place. The
+> generated hardware is unaffected: both arrangements elaborate to byte-identical
+> FIRRTL and SystemVerilog (checked by diffing both trees before and after).
+> Because the functions no longer live inside a class, each one derives its data
+> type from its own argument with `chiselTypeOf(a.bits)` instead of closing over
+> `gen`.
+
+The two functions are wrapped in an `object Arbitration` for a reason that is
+easy to trip over: Scala 2 has **no top-level `def`** — a bare function at the
+top level of a file is a compile error, so a free function must live in an
+`object` (or be a method of a class, as in the book's version).
+
+*Scala note — an `object` as a namespace, and why a free `def` needs one → [§A.7](../SCALA-NOTES.md#a7-object-as-a-namespace--companion-object); passing a function as a parameter → [§E.4](../SCALA-NOTES.md#e4-higher-order-functions).*
+
+All that is left is to write the two 2:1 arbitration functions themselves. They
+live side by side in the `Arbitration` object, priority first:
+
+> **About the waveforms below.** Each diagram below shows **one 2:1 node** (an
 > `Arbiter(2, UInt(8.W))`, i.e. a tree of a single node), with `in(0)` playing
 > the role of `a` and `in(1)` of `b`. Every value in them was **recorded from a
 > real simulation** — a temporary chiseltest bench peeked every port each cycle;
@@ -1433,14 +1483,14 @@ one out before the code:
 
 `src/main/scala/ArbiterTree.scala`
 ```scala
-  def arbitrateSimp(a: DecoupledIO[T], b: DecoupledIO[T]) = {
+  def arbitrateSimp[T <: Data](a: DecoupledIO[T], b: DecoupledIO[T]): DecoupledIO[T] = {
 
-    val regData = Reg(gen)
+    val regData = Reg(chiselTypeOf(a.bits))
     val regEmpty = RegInit(true.B)
     val regReadyA = RegInit(false.B)
     val regReadyB = RegInit(false.B)
 
-    val out = Wire(new DecoupledIO(gen))
+    val out = Wire(new DecoupledIO(chiselTypeOf(a.bits)))
 
     when (a.valid & regEmpty & !regReadyB) {
       regReadyA := true.B
@@ -1491,14 +1541,27 @@ Note that `regReadyA`/`regReadyB` **are** the `ready` outputs — `a.ready :=
 regReadyA` — which is what "registering the decision" means concretely. The
 grant is decided one cycle, then presented the next.
 
-**Each word travels through three phases.** Follow one word from input `a`:
+**Each word travels through three phases.** Follow one word from input `a`
+(the snippets below are condensed from `src/main/scala/ArbiterTree.scala` — the
+statements are the file's, the layout is squeezed onto one line where it fits):
 
-1. **Decide.** The slot is free and `a` is asking, so promise it to `a`:
+1. **Decide.** The slot is free and an input is asking, so promise the slot to
+   one of them — a single `when`/`.elsewhen` chain that tests `a` first:
    ```scala
-   when (a.valid & regEmpty & !regReadyB) { regReadyA := true.B }
+   when (a.valid & regEmpty & !regReadyB) {
+     regReadyA := true.B
+   } .elsewhen (b.valid & regEmpty & !regReadyA) {
+     regReadyB := true.B
+   }
    ```
-   The `!regReadyB` guard is what keeps the promise exclusive — there is only
-   one slot, so at most one input may hold a grant at a time.
+   The `!regReadyB` / `!regReadyA` guards keep the promise exclusive — there is
+   only one slot, so at most one input may hold a grant at a time.
+
+   **This chain is the whole reason it is a *priority* arbiter.** Whenever the
+   slot is free and `a` is asking, the first branch is taken and the `.elsewhen`
+   is never evaluated, so `a` always wins and a busy `a` starves `b` completely
+   — exactly what the waveform below shows, and what the fair version in the
+   next subsection fixes by adding state that remembers whose turn it is.
 
 2. **Capture.** Next cycle `a.ready` is high. Assumption 1 above guarantees `a`
    is still holding `valid` with the same `bits`, so the word can simply be
@@ -1515,28 +1578,97 @@ grant is decided one cycle, then presented the next.
    when (out.ready) { regEmpty := true.B }
    ```
 
-**One subtlety worth pausing on.** In the capture cycle, `regEmpty` is *still*
-`1` (it only clears at the end of that cycle), so the phase-1 `when` fires
-again and re-asserts `regReadyA := true.B`. The phase-2 block then assigns
-`regReadyA := false.B`. Both assignments happen in the same cycle — and the
-**last connection wins** in Chisel, so `false` is the one that takes effect and
-the grant correctly drops. That rule is what makes reading these `when` chains
-top-to-bottom work: later statements override earlier ones.
+**One subtlety worth pausing on** — it is **cycle 1** of the diagram below (and
+cycles 4, 7, 10: every cycle in which `in(0).ready` is high).
 
-**Why it is a *priority* arbiter.** The decision is a single `when`/`.elsewhen`
-chain that tests `a` first:
+Start from the rule that makes it happen: in Chisel, `someReg := value` does
+**not** change the register during the current cycle. It describes the value the
+register will take *at the next clock edge*. Everything a cycle reads is the
+register's **old** value.
 
-*illustrative — the decision, condensed*
+So in the capture cycle, phase 2 runs `regEmpty := false.B` — but `regEmpty`
+still *reads* as `1` for the whole of that cycle. And the phase-1 decide chain
+reads `regEmpty`. Its condition `a.valid & regEmpty & !regReadyB` is therefore
+**still true**, and it fires a second time, scheduling `regReadyA := true.B`.
+
+Now two statements in the same cycle target the same register:
+
+| order in the code | statement | phase |
+|---|---|---|
+| earlier | `regReadyA := true.B` | 1, decide — fires again because `regEmpty` still reads `1` |
+| later | `regReadyA := false.B` | 2, capture |
+
+Chisel resolves this by **last connection wins**: the later statement is the one
+that takes effect, so `regReadyA` goes to `0` at the next edge. That is exactly
+what you see in the figure — `in(0).ready` (which *is* `regReadyA`) is high for
+**one cycle only**, cycle 1, and is back low in cycle 2. Had the earlier
+assignment won instead, `ready` would stay high and the arbiter would keep
+re-accepting `a` forever.
+
+The same rule is what lets you read these `when` chains straight down the page:
+a later statement overrides an earlier one, so the last assignment to a signal is
+the one that counts.
+
+**So does the order of the `when` blocks matter? Yes — for this signal.** It is
+worth proving to yourself rather than taking on faith, because "the register
+just goes to `0` at the edge" feels like it should be true regardless.
+[Appendix A](#appendix-a--statement-order-in-arbitratesimp) builds the arbiter
+twice from the same statements in the two orders and compares them, down to the
+emitted SystemVerilog: swapped, the arbiter grants input `a` **8 times while
+forwarding only 4 words**.
+
+#### Writing it so the order cannot matter
+
+Depending on statement order for correctness is a fragile way to write this.
+Nothing in `arbitrateSimp` announces that two blocks collide; a reader has to
+discover it, and a later edit that reorders the blocks silently changes the
+hardware. The safer construction is to make the collision impossible — then the
+order is free, and the reader does not need the rule at all.
+
+One line does it. The decide chain should fire only when **no grant is
+outstanding**:
+
+`src/main/scala/ArbiterVariants.scala`
 ```scala
-when (a.valid & regEmpty & !regReadyB) { regReadyA := true.B }
-.elsewhen (b.valid & regEmpty & !regReadyA) { regReadyB := true.B }
+    val noGrant = !regReadyA & !regReadyB          // <- the whole fix
+
+    when (a.valid & regEmpty & noGrant) {
+      regReadyA := true.B
+    } .elsewhen (b.valid & regEmpty & noGrant) {
+      regReadyB := true.B
+    }
 ```
 
-Whenever the slot is free and `a` is asking, the first branch is taken and the
-`.elsewhen` is never evaluated. Input `a` always wins, so a busy `a` starves
-`b` completely — exactly what the waveform below shows, and what the fair
-version in the next subsection fixes by adding state that remembers whose turn
-it is.
+`noGrant` is false in exactly the cycle the capture block fires, so decide and
+capture can never both assign `regReadyA`. Nothing is left for last-connect-wins
+to resolve, and the statements may be written in either order. The same test
+file checks both halves of that claim against 200 cycles of stimulus in which
+the inputs idle and the consumer stalls:
+
+```
+$ sbt "testOnly ArbiterOrderTest"
+order-free vs arbitrateSimp: 200 cycles, 0 mismatching
+order-free, decide-first vs capture-first: 200 cycles, 0 mismatching
+```
+
+Identical behaviour to the book's version, and immune to the swap that breaks
+it. This is the same principle the **fair** arbiter uses in the next subsection,
+where `switch`/`is` makes the cases mutually exclusive *by construction* — which
+is why reordering its branches changes nothing (also verified, 200 cycles).
+
+> **One caveat about "same functionality".** The rewrite fixes the *ordering*
+> fragility, not the second defect described below: `regEmpty` is still cleared
+> by `when (out.ready)` rather than by `when (out.valid & out.ready)`, so a
+> consumer that parks `ready` high still gets nothing. Fixing that one changes
+> behaviour on purpose — measured, the parked-consumer case goes from **0 words
+> delivered to 8** — which is why it is a separate change rather than part of
+> the order-free rewrite.
+
+The chapter keeps the book's `arbitrateSimp` as the code under discussion, so
+`ArbiterTree.scala` holds only the two arbiters the book prints. The rewrite and
+the deliberately-worse variant live apart in
+`src/main/scala/ArbiterVariants.scala`, and the measurements in
+`src/test/scala/ArbiterOrderTest.scala`.
 
 **Cycle by cycle.** Both inputs request forever (`a` sends `1`, `b` sends `2`,
 both hold `valid` high), and the consumer plays a correct handshake: it asserts
@@ -1547,24 +1679,19 @@ both hold `valid` high), and the consumer plays a correct handshake: it asserts
 </p>
 
 ***Timing diagram — the priority arbiter (`arbitrateSimp`), both inputs
-requesting.*** Read it four cycles at a time — that is one full period:
+requesting.*** It is the three phases above, one per cycle, repeating with a
+**three-cycle period** — so each phase is a lane you can pick out by eye:
 
-- **Cycle 0** — `regEmpty` is `1` and neither `ready` is asserted yet. This is
-  the cycle in which `a.valid & regEmpty & !regReadyB` holds, so `regReadyA` is
-  set *for the next* cycle. (`ready` is registered; that is the whole point of
-  this arbiter.)
-- **Cycle 1** — `in(0).ready` is high. Because `a` still holds `valid`, the
-  `when (regReadyA)` block captures `a.bits` into `regData`, clears `regEmpty`,
-  and drops `regReadyA` again.
-- **Cycle 2** — `regEmpty` is `0`, so `out.valid` is high with `out.bits = 1`.
-  The consumer sees `valid`, asserts `ready`, and `regEmpty` is set again.
-- **Cycle 3** — `regEmpty` is back to `1`, but no `ready` is asserted yet: a
-  registered `ready` can only be *set* in a cycle where `regEmpty` is already
-  high, so this cycle is spent deciding. Cycle 4 then repeats cycle 1.
+| cycles | phase | what to look for in the trace |
+|---|---|---|
+| 0, 3, 6, 9 | decide | `regEmpty` high, both `ready` low — the grant is being registered *for the next* cycle |
+| 1, 4, 7, 10 | capture | `in(0).ready` high while `regEmpty` is **still** high — the cycle the subtlety above is about |
+| 2, 5, 8, 11 | hand over | `regEmpty` low, `out.valid` high with `out.bits = 1`, and the consumer answering with `out.ready` |
 
 Two things stand out. First, the throughput of one node is **one word every
-four cycles** with this consumer — the acknowledge, the capture, and the
-handover each cost a cycle. Second, and the section's real point:
+three cycles** with this consumer — the decide, the capture and the handover
+each cost a cycle. (The wave test bears this out: 8 words accepted in 24
+cycles.) Second, and the section's real point:
 **`in(1).ready` never rises at all.** Every time `regEmpty` is high, `a.valid`
 is high and `regReadyB` is low, so the `when`/`.elsewhen` chain always takes
 the first branch. Input `b` is locked out forever — that is the starvation the
@@ -1578,14 +1705,14 @@ with two idle states (so each input gets a turn) and two "has data" states:
 
 `src/main/scala/ArbiterTree.scala`
 ```scala
-  def arbitrateFair(a: DecoupledIO[T], b: DecoupledIO[T]) = {
+  def arbitrateFair[T <: Data](a: DecoupledIO[T], b: DecoupledIO[T]): DecoupledIO[T] = {
     object State extends ChiselEnum {
       val idleA, idleB, hasA, hasB = Value
     }
     import State._
-    val regData = Reg(gen)
+    val regData = Reg(chiselTypeOf(a.bits))
     val regState = RegInit(idleA)
-    val out = Wire(new DecoupledIO(gen))
+    val out = Wire(new DecoupledIO(chiselTypeOf(a.bits)))
     a.ready := regState === idleA
     b.ready := regState === idleB
     out.valid := (regState === hasA || regState === hasB)
@@ -1642,32 +1769,30 @@ requesting forever, `a` sending `1` and `b` sending `2`, consumer asserting
 </p>
 
 ***Timing diagram — the fair arbiter (`arbitrateFair`), both inputs
-requesting.*** The `regState` lane is the whole story; the period is again four
-cycles, but this time it delivers **two** words:
+requesting.*** The `regState` lane is the whole story; the period here is four
+cycles — one per state — but unlike the priority arbiter's three-cycle period it
+delivers **two** words in that time:
 
-- **Cycle 0** — `regState = idleA`, so `a.ready` (`in(0).ready`) is high and
-  `b.ready` is low. `a.valid` is high, so `regData := a.bits` and the state goes
-  to `hasA`.
-- **Cycle 1** — `hasA`: `out.valid` is high with `out.bits = 1`. The consumer
-  takes it (`out.ready`), and the state moves to `idleB` — the *other* input's
-  turn, which is exactly what makes the arbiter fair.
-- **Cycle 2** — `idleB`: now `in(1).ready` is the one asserted, `b.bits = 2` is
-  captured, state goes to `hasB`.
-- **Cycle 3** — `hasB`: `out.bits = 2` is handed over, and the state returns to
-  `idleA`.
+| cycles | `regState` | what to look for in the trace |
+|---|---|---|
+| 0, 4, 8 | `idleA` | `in(0).ready` high, `in(1).ready` low — `a.bits` is captured *and* decided in this one cycle, then → `hasA` |
+| 1, 5, 9 | `hasA` | `out.valid` high with `out.bits = 1`; the consumer takes it, and the state moves to `idleB` — the *other* input's turn, which is what makes it fair |
+| 2, 6, 10 | `idleB` | now `in(1).ready` is the asserted one and `b.bits = 2` is captured, then → `hasB` |
+| 3, 7, 11 | `hasB` | `out.bits = 2` handed over, state returns to `idleA` |
 
 Compare the two `ready` lanes with the priority diagram: here they take turns
 (and are never both high — there is only one data register), so `out.bits`
 alternates `1, 2, 1, 2, …` and neither input starves. Throughput is **one word
-every two cycles**, twice the priority arbiter's, because the idle state does
-the deciding *and* the capturing in one cycle instead of spending a cycle on a
+every two cycles** (6 words in 12 cycles), against the priority arbiter's one
+every three — half again as fast — because the idle state does the deciding
+*and* the capturing in one cycle, instead of spending a separate cycle on a
 registered `ready`.
 
 The waveform doesn't show the "input not valid" case, because both inputs
 request in every cycle here. If, say, `a` were idle in `idleA`, the `otherwise`
 branch would move straight to `idleB` on the next edge, so an idle input costs
 one cycle and never blocks the other one. `regData` is undefined (`x`) until the
-first capture — it is a plain `Reg(gen)`, with no reset value.
+first capture — it is a plain `Reg`, with no reset value.
 
 #### Fair vs. priority, measured
 
@@ -1716,7 +1841,7 @@ concrete, and the tests assert exactly it:
 > other cycle and `regData` becomes `1` — it is just thrown away each time,
 > because the later `when (out.ready) { regEmpty := true.B }` overrides the
 > `regEmpty := false.B` from the capture. Note also that `in(0).ready` now
-> pulses every second cycle rather than every fourth: the arbiter thinks it is
+> pulses every second cycle rather than every third: the arbiter thinks it is
 > empty and keeps re-accepting `a`.
 
 #### Recording your own waveforms
@@ -1738,7 +1863,7 @@ $ sbt "testOnly ArbiterWaveTest"
 [wave] priority, slow consumer    -> List(1, 1, 1, 1, 1, 1)
 [wave] fair, slow consumer        -> List(1, 2, 1, 2, 1, 2, 1, 2)
 [wave] priority, 4-input tree     -> List(1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3)
-[wave] fair, 4-input tree         -> List(3, 1, 4, 2, 3, 1, 4, 2, 3, 1, 4, 2, 3, 1, 4)
+[wave] fair, 4-input tree         -> List(3, 1, 4, 2, 3, 1, 4, 2, 3, 1, 4, 2, 3, 1, 4, 2, 3, 1, 4)
 [info] Tests: succeeded 8, failed 0, canceled 0, ignored 0, pending 0
 ```
 
@@ -1793,12 +1918,12 @@ To add a scenario of your own, copy one of the eight tests and change the
 $ sbt test
 ```
 
-Expected tail (47 tests across 13 suites):
+Expected tail (50 tests across 14 suites):
 
 ```
-[info] Total number of tests run: 47
-[info] Suites: completed 13, aborted 0
-[info] Tests: succeeded 47, failed 0, canceled 0, ignored 0, pending 0
+[info] Total number of tests run: 50
+[info] Suites: completed 14, aborted 0
+[info] Tests: succeeded 50, failed 0, canceled 0, ignored 0, pending 0
 [info] All tests passed.
 ```
 
@@ -1881,12 +2006,12 @@ The selection is nothing fancier than a `Seq` of name → *function value* pairs
 wrapping each `emitVerilog` in `() => …` is what keeps an unselected design from
 being elaborated when the `Seq` is built:
 
-`src/main/scala/Generate.scala`
+*illustrative — the first entries of the table in `src/main/scala/Generate.scala`*
 ```scala
   val designs: Seq[(String, () => Unit)] = Seq(
-    "BcdTable" -> (() => emitVerilog(new BcdTable())),
-    "GenHardware" -> (() => emitVerilog(new GenHardware())),
-    "UseAdder" -> (() => emitVerilog(new UseAdder())),   // ParamAdder(8) and (16)
+    "BcdTable" -> (() => emitVerilog(new BcdTable(), opts)),
+    "GenHardware" -> (() => emitVerilog(new GenHardware(), opts)),
+    "UseAdder" -> (() => emitVerilog(new UseAdder(), opts)),   // ParamAdder(8) and (16)
     ...
   )
 ```
@@ -1971,6 +2096,203 @@ Generate a sine lookup table with a few lines of Scala (`math.sin`, scaled to
 `UInt`) and index it with a counter. Then write a `reduceTree`-based generator
 (e.g. a wide OR, a max-finder, or a popcount) and test it against a Scala
 reference model.
+
+---
+
+## Appendix A — statement order in `arbitrateSimp`
+
+[§10.6.1's simple arbiter](#simple-arbitration) depends on the order of two
+`when` blocks. This appendix is the experiment behind that claim: the same
+statements, in the two orders, compared in behaviour and in emitted Verilog.
+The functions live in `src/main/scala/ArbiterVariants.scala`, the measurements
+in `src/test/scala/ArbiterOrderTest.scala`.
+
+### The two versions
+
+`arbitrateSimp` (in `ArbiterTree.scala`) writes the **decide chain first** and
+the **capture blocks second**. `arbitrateSimpSwapped` (in
+`ArbiterVariants.scala`) is a copy whose only difference is that the capture
+blocks come first:
+
+`src/main/scala/ArbiterVariants.scala`
+```scala
+    // ---- capture FIRST (in arbitrateSimp this block comes second) ----------
+    when (regReadyA) {
+      regData := a.bits
+      regEmpty := false.B
+      regReadyA := false.B
+    }
+    when (regReadyB) {
+      regData := b.bits
+      regEmpty := false.B
+      regReadyB := false.B
+    }
+
+    // ---- decide SECOND (in arbitrateSimp this chain comes first) ----------
+    when (a.valid & regEmpty & !regReadyB) {
+      regReadyA := true.B
+    } .elsewhen (b.valid & regEmpty & !regReadyA) {
+      regReadyB := true.B
+    }
+```
+
+Both are built from the same class — this is what taking the arbitration
+function as a parameter buys — and driven with identical stimulus:
+
+*illustrative — the two devices under test*
+```scala
+new Arbiter(2, UInt(8.W), arbitrateSimp[UInt])          // decide, then capture
+new Arbiter(2, UInt(8.W), arbitrateSimpSwapped[UInt])   // capture, then decide
+```
+
+### The difference in behaviour
+
+```
+$ sbt "testOnly ArbiterOrderTest"
+cycle              :  0  1  2  3  4  5  6  7  8  9 10 11
+in(0).ready  decide-then-capture:  0  1  0  0  1  0  0  1  0  0  1  0
+in(0).ready  capture-then-decide:  0  1  1  0  1  1  0  1  1  0  1  1
+grant cycles: as written = 4, swapped = 8   (words delivered: 4 vs 4)
+```
+
+As written, the grant is one cycle wide and every grant yields a word. Swapped,
+the grant is two cycles wide: the arbiter asserts `ready` to input `a` **8 times
+but forwards only 4 words**, so a compliant producer counts eight accepted
+transfers and four words are silently lost. The test asserts all three
+properties, so the claim cannot rot.
+
+### The difference in emitted SystemVerilog
+
+`ArbiterVariants.scala` also carries a small emitter, so the comparison is
+reproducible:
+
+```
+$ sbt "runMain ArbiterOrderEmit"
+emitting generated/order_asWritten.sv
+emitting generated/order_swapped.sv
+emitting generated/order_free.sv
+emitting generated/order_freeSwapped.sv
+
+$ diff generated/order_asWritten.sv generated/order_swapped.sv
+86c86
+<       io_out_regReadyA <= ~io_out_regReadyA & (_io_out_T_2 | io_out_regReadyA);
+---
+>       io_out_regReadyA <= _io_out_T_2;
+88,90c88
+<         ~io_out_regReadyB
+<         & (~_io_out_T_2 & io_in_1_valid & io_out_regEmpty & ~io_out_regReadyA
+<            | io_out_regReadyB);
+---
+>         ~_io_out_T_2 & io_in_1_valid & io_out_regEmpty & ~io_out_regReadyA;
+```
+
+`_io_out_T_2` is the decide condition. Read the two right-hand sides:
+
+| order | next value of `regReadyA` | meaning |
+|---|---|---|
+| decide, then capture | `~regReadyA & (T_2 \| regReadyA)` | the capture's `0` **masks** the decide — a grant always drops after one cycle |
+| capture, then decide | `T_2` | the capture has vanished; the decide alone drives the register |
+
+In the swapped build the capture's `regReadyA := false.B` contributes *nothing*
+to the emitted logic — it was overridden at elaboration, so firtool never sees
+it. That is last-connect-wins made visible in the final Verilog.
+
+The FIRRTL one level up shows the same thing as nested multiplexers, later
+statement outermost:
+
+```
+node _GEN_1 = mux(_io_out_T_2,      UInt<1>("h1"), io_out_regReadyA)  // decide  -> 1  (earlier)
+node _GEN_5 = mux(io_out_regReadyA, UInt<1>("h0"), _GEN_1)            // capture -> 0  (later)
+io_out_regReadyA <= mux(reset, UInt<1>("h0"), _GEN_5)
+```
+
+### Why the fix works: one line of algebra
+
+Run the same comparison on the order-free rewrite of
+[§10.6.1](#writing-it-so-the-order-cannot-matter) and the result is, at first
+sight, disappointing — the two orders still emit *different text*:
+
+```
+$ diff generated/order_free.sv generated/order_freeSwapped.sv
+88,92c88,89
+<       io_out_regReadyA <= ~io_out_regReadyA & (_io_out_T_1 | io_out_regReadyA);
+<       io_out_regReadyB <=
+<         ~io_out_regReadyB
+<         & (~_io_out_T_1 & io_in_1_valid & io_out_regEmpty & io_out_noGrant
+<            | io_out_regReadyB);
+---
+>       io_out_regReadyA <= _io_out_T_1;
+>       io_out_regReadyB <= ~_io_out_T_1 & io_in_1_valid & io_out_regEmpty & io_out_noGrant;
+```
+
+Elaboration still applies last-connect-wins, so the decide-first version still
+wraps the decide result in the capture's mask. What changed is what that mask is
+worth. Both conditions are in the emitted code:
+
+```
+$ grep -E "noGrant =|_io_out_T_1 =" generated/order_free.sv
+      io_out_noGrant = ~io_out_regReadyA & ~io_out_regReadyB;
+      _io_out_T_1 = io_in_0_valid & io_out_regEmpty & io_out_noGrant;
+```
+
+`T_1` already contains `~A`. Writing `A` for `regReadyA`:
+
+```
+decide-first :  ~A & (T_1 | A)  =  ~A & T_1  =  T_1     because T_1 implies ~A
+capture-first:  T_1
+```
+
+The mask is **redundant**, so the two orders compute the same function — which
+is why the 200-cycle comparison finds no difference. Now do the same for the
+book's version, where the guard is `!regReadyB` only:
+
+```
+$ grep "_io_out_T_2 =" generated/order_asWritten.sv
+      _io_out_T_2 = io_in_0_valid & io_out_regEmpty & ~io_out_regReadyB;
+```
+
+```
+decide-first :  ~A & (T_2 | A)  =  ~A & T_2
+capture-first:  T_2
+```
+
+`T_2` says nothing about `A`, so the mask is **load-bearing**: the two differ
+exactly when `A ∧ T_2` — the capture cycle — which is the 8-grants-for-4-words
+divergence measured above.
+
+| version | decide-first | capture-first | equal? |
+|---|---|---|---|
+| `arbitrateSimp` (`!regReadyB`) | `~A & T_2` | `T_2` | **no** — differ when `A ∧ T_2` |
+| order-free (`noGrant`) | `~A & T_1` | `T_1` | **yes** — `T_1` implies `~A` |
+
+That is the real justification for adding `!regReadyA` to the guard. It is not
+"safer by convention": it makes the override *provably redundant*, so statement
+order stops mattering as a matter of algebra rather than of care. The redundant
+`~A &` that firtool leaves in the decide-first form costs nothing — logic
+synthesis folds it — but it is worth knowing that the tool does not prove it
+away, so "same behaviour" does not imply "same netlist text".
+
+### What is *not* order-sensitive
+
+> Moving `a.ready := regReadyA` to a different point in the same function
+> changes **nothing** — verified by diffing the emitted SystemVerilog, which
+> comes out byte-identical. Two reasons, and the second is the one that matters:
+> `a.ready` is assigned exactly **once**, so there is no later statement to
+> override it; and `:=` is a *connection*, not a value copy — it wires `a.ready`
+> to the register's **output**, so it tracks that register wherever the line
+> sits. Statement order decides *which connection survives*, not the order in
+> which values are computed.
+>
+> Note also what the ordering tests do **not** catch: with the blocks swapped,
+> `ArbiterTreeTest` still passes 5/5, because it asserts which values arrive and
+> that `b` starves, not the shape of the handshake. Only the cycle-level trace
+> shows it — an argument for the waveform tests of
+> [§10.6.1](#recording-your-own-waveforms).
+
+The order-free rewrite that removes the whole issue is in
+[§10.6.1](#writing-it-so-the-order-cannot-matter).
+
+---
 
 Back to the **[tutorial index](../README.md)**.
 Previous: **[Chapter 9 — Communicating State Machines](../ch09-communicating-state-machines/README.md)**.

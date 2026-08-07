@@ -186,6 +186,50 @@ object Constants {
 }
 ```
 
+**There is no top-level `def` in Scala 2.** Convenience is not the only reason a
+free function ends up inside an `object` — it is the only place it may go. At the
+top level of a file Scala 2 accepts a `class`, a `trait`, an `object`, or a
+`package object`, and nothing else; a bare `def` (or `val`) there is a
+compile-time error, not a style warning:
+
+*illustrative — does not compile under Scala 2.13*
+```scala
+import chisel3._
+
+def arbitrateSimp[T <: Data](a: DecoupledIO[T], b: DecoupledIO[T]) = { ... }
+```
+```
+ArbiterTree.scala:26:3: expected class or object definition
+  def arbitrateSimp[T <: Data](a: DecoupledIO[T], b: DecoupledIO[T]) = {
+  ^
+```
+
+*(ch10)* — this is why the two 2:1 arbitration functions of §10.6.2, which are
+deliberately kept *outside* the modules so that the arbiter class can take one as
+a parameter, are wrapped in an `object`:
+
+`ch10-hardware-generators/src/main/scala/ArbiterTree.scala`
+
+```scala
+object Arbitration {
+  def arbitrateSimp[T <: Data](a: DecoupledIO[T], b: DecoupledIO[T]): DecoupledIO[T] = { ... }
+  def arbitrateFair[T <: Data](a: DecoupledIO[T], b: DecoupledIO[T]): DecoupledIO[T] = { ... }
+}
+
+import Arbitration._
+```
+
+The wrapper can equally well be the **companion** of the class that uses the
+functions (`object Arbiter` next to `class Arbiter`) — the choice is only about
+naming, since either way `import <object>._` brings the names into bare scope.
+Note also that the restriction applies to the *top level* only: a `def` **inside**
+a class, object, or even another method is fine, which is why the book's version
+of these arbiters — where each function is a method of its own Module subclass —
+needs no wrapper at all.
+
+Scala 3 lifted the restriction and does allow top-level `def`s and `val`s; this
+tutorial pins Scala 2.13, so the `object` is required here.
+
 ---
 
 ## B. Data & enumeration types
