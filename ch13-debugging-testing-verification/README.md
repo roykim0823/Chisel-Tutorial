@@ -339,15 +339,17 @@ module-level verification well, but not everything:
   cycles) is normally driven by a C++ or SV harness for speed;
 - UVM has no Chisel equivalent;
 - multi-cycle **SVA** properties (`|->`, `##1`, `throughout`) are not
-  expressible as Chisel `assert`s, which are immediate assertions;
+  expressible as a Chisel `assert`, which is an *immediate* assertion — though
+  they **are** expressible with `chisel3.ltl`, see below;
 - after synthesis there is no Chisel and no FIRRTL — gate-level simulation runs
   on a netlist, so the testbench must be SV or C++;
 - if your organization's verification environment is SV/UVM, your block is a DUT
   inside it.
 
-Levels [B3](../system_verilog/level-b3-printf-assert-pipeline/README.md) and
-[D](../system_verilog/level-d-advanced/README.md) of the
-[SystemVerilog appendix](../system_verilog/README.md) cover that territory.
+**What this chapter's `assert` actually emits** — the `$error`/`$fatal` form, the
+concurrent-SVA form that formal tools consume, and why `Assert`'s assertion is
+deleted while `AssertOverflow`'s survives — is worked through with real captured
+output in [`SYSTEMVERILOG-NOTES.md` §N](../SYSTEMVERILOG-NOTES.md#n-simulation-only-constructs).
 
 ---
 

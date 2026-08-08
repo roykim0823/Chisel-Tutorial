@@ -34,7 +34,8 @@ readability (see [§B.3](#b3-stripping-the-noise)).*
 - [K. Different style, identical hardware](#k-different-style-identical-hardware)
 - [L. Things Chisel will not generate](#l-things-chisel-will-not-generate)
 - [M. Diffing two designs yourself](#m-diffing-two-designs-yourself)
-- [N. Where the generated files are](#n-where-the-generated-files-are)
+- [N. Simulation-only constructs](#n-simulation-only-constructs)
+- [O. Where the generated files are](#o-where-the-generated-files-are)
 
 ---
 
@@ -986,7 +987,162 @@ technique: emit to a string and count comparators, multiplexers, and wires.
 
 ---
 
-## N. Where the generated files are
+## N. Simulation-only constructs
+
+`printf`, `assert`, and `stop` are the three Chisel constructs that describe **no
+hardware**. They emit SystemVerilog that exists only during simulation and
+disappears at synthesis, and the shape of that code answers several questions
+Chapter 13 raises.
+
+### N.1 `assert` → `$error` / `$fatal`
+
+`ch13-debugging-testing-verification/src/main/scala/Assert.scala`
+```scala
+class AssertOverflow extends Module {
+  val io = IO(new Bundle {
+    val a = Input(UInt(8.W))
+    val b = Input(UInt(8.W))
+    val sum = Output(UInt(8.W))
+  })
+  io.sum := io.a + io.b
+
+  assert(io.sum >= io.a, "8-bit add must not overflow")
+}
+```
+
+```
+  wire [7:0] _io_sum_T = io_a + io_b;
+  `ifndef SYNTHESIS
+    always @(posedge clock) begin
+      if (~reset & _io_sum_T < io_a) begin
+        if (`ASSERT_VERBOSE_COND_)
+          $error("Assertion failed: 8-bit add must not overflow\n    at Assert.scala:34 assert(io.sum >= io.a, \"8-bit add must not overflow\")\n");
+        if (`STOP_COND_)
+          $fatal;
+      end
+    end
+  `endif // not def SYNTHESIS
+  assign io_sum = _io_sum_T;
+```
+
+Four things to read here.
+
+**The condition is inverted.** You assert `sum >= a`; the emitted code fires on
+`_io_sum_T < io_a`. An assertion checks for the *failure*, so expect the negation.
+
+**It carries your Chisel source location and the original expression text** into
+the `$error` string. A failing assertion in a simulation log points at
+`Assert.scala:34`, not at a line of Verilog — the most useful property of this
+output.
+
+**It is reset-gated** (`~reset &`). A design in reset is not expected to hold its
+invariants. The same gating applies to `printf`, which is the usual explanation
+for "my `printf` printed nothing" — check your reset duration first.
+
+**`$error` and `$fatal` are separately gated**, by `` `ASSERT_VERBOSE_COND_ ``
+and `` `STOP_COND_ ``, so a testbench can log failures without aborting.
+
+### N.2 An assertion that cannot fail is not emitted
+
+The chapter's other adder asserts a tautology — `io.sum` was *defined* as
+`io.a + io.b`:
+
+`ch13-debugging-testing-verification/src/main/scala/Assert.scala`
+```scala
+  assert(io.sum === io.a + io.b)
+```
+
+and its entire generated module is:
+
+```
+module Assert(
+  input        clock,
+               reset,
+  input  [7:0] io_a,
+               io_b,
+  output [7:0] io_sum
+);
+
+  assign io_sum = io_a + io_b;
+endmodule
+```
+
+**No assertion at all.** firtool proved it constant and deleted it. Before
+concluding that an assertion is protecting you, check that it survived into the
+output — a check that cannot fail is not a check.
+
+### N.3 The SVA form
+
+Formal tools do not consume `$error` calls; they consume **concurrent
+assertions**. The same design, emitted with firtool's
+`--emit-chisel-asserts-as-sva` (`sbt "runMain GenerateSva"` in Chapter 13):
+
+```
+  wire [7:0] _io_sum_T = io_a + io_b;
+  wire       _GEN = reset | _io_sum_T >= io_a;
+  assert__chisel3_builtin:
+    assert property (@(posedge clock) _GEN)
+    else $error("Assertion failed: 8-bit add must not overflow\n    at Assert.scala:34 assert(io.sum >= io.a, \"8-bit add must not overflow\")\n");
+  `ifdef USE_PROPERTY_AS_CONSTRAINT
+    assume__chisel3_builtin: assume property (@(posedge clock) _GEN);
+  `endif // USE_PROPERTY_AS_CONSTRAINT
+```
+
+Same design, same assertion, a different contract with the tools:
+
+- `assert property (...)` instead of an `if` inside an `always` block, and **no**
+  `` `ifndef SYNTHESIS `` wrapper.
+- The condition is **not** inverted this time — `_GEN` is the positive property,
+  with reset-gating folded in as `reset | ...`.
+- `USE_PROPERTY_AS_CONSTRAINT` lets the same property be re-used as an
+  *assumption*, which is how you constrain a formal run.
+
+If you hand RTL to a formal tool without this flag, your assertions ship as
+`$error` calls the tool ignores.
+
+### N.4 Multi-cycle properties
+
+A Chisel `assert` is an **immediate** assertion — one condition, one clock edge.
+SystemVerilog's temporal operators (`|->`, `##[1:2]`, `throughout`) describe
+behaviour *over time*, and those cannot be written as an `assert`.
+
+They **can** be written in Chisel, via `chisel3.ltl`:
+
+*illustrative*
+```scala
+import chisel3.ltl._
+import chisel3.ltl.Sequence.BoolSequence
+
+AssertProperty(io.req.implication(io.grant.delayRange(1, 2)))
+```
+
+which emits genuine SVA — `io_req |-> ##[1:2] io_grant`, with a `disable iff`
+guard firtool generates for you. So "Chisel cannot express SVA" is wrong;
+"a Chisel `assert` cannot" is right.
+
+### N.5 What your tests actually exercise
+
+Worth restating here because it changes what all of the above means: with
+ChiselTest's default **Treadle** backend, `sbt test` simulates **FIRRTL**, not the
+SystemVerilog on this page. Switching to the Verilator backend runs the same test
+code against the real emitted RTL. Chapter 13's
+[§13.2](ch13-debugging-testing-verification/README.md#which-artifact-are-your-tests-actually-running)
+covers the difference, the one-line change, and a verified toolchain caveat.
+
+**Where Chisel test code stops.** Module-level verification is well covered, but
+some things need a SystemVerilog or C++ testbench regardless:
+
+- running software on a core — loading an ELF and simulating for millions of
+  cycles is normally driven by a C++ or SV harness, for speed;
+- UVM's constrained-random, coverage-driven machinery, which has no Chisel
+  equivalent;
+- gate-level simulation — after synthesis there is no Chisel and no FIRRTL, only
+  a netlist;
+- any design that must sit as a DUT inside an existing SV/UVM environment.
+
+---
+
+## O. Where the generated files are
 
 Each chapter writes into its own `generated/` folder, which is `.gitignore`d —
 run `sbt "runMain Generate"` inside a chapter to (re)create it.

@@ -162,27 +162,39 @@ An **independent** four-level appendix (A basics → B verification → C synthe
 → D advanced), not tied to the book chapters. One directory per level, each
 write-up named `README.md` like the chapters.
 
-`level-a-basics/` is a full sbt project on the same pinned versions, with one
-source file per write-up section and a `Generate` entry point. **Every
-SystemVerilog block in Level A is real captured output** — the idealized,
-hand-written SV it started with was wrong in ways that mattered (`always_ff`,
+Each part with generated output is a full sbt project on the same pinned
+versions, with one source file per write-up section and a `Generate` entry point.
+**Every SystemVerilog block in them is real captured output** — the idealized,
+hand-written SV they started with was wrong in ways that mattered (`always_ff`,
 `always_comb`, `input logic`, `case` statements, and `_T_*` temporaries that
 firtool never emits).
+
+`ch01-syntax/` is the one part with **no project**: it is a
+SystemVerilog language primer, deliberately hand-written, and says so up front.
 
 Two conventions here differ from the chapters, deliberately:
 
 - **Generated blocks DO carry a path label** (`` `generated/Adder.sv` ``),
   unlike chapter READMEs where generated output is unlabelled. The appendix is
   about the generated files themselves, so the reader needs to find them.
-- **Section 1 of Level A is hand-written SV on purpose** — it teaches the
-  language. It carries a blanket note saying so; do not "fix" it to match
-  generated output.
+- **A1 is hand-written SV on purpose** — it teaches the language. It carries a
+  blanket note saying so; do not "fix" it to match generated output.
 
-Levels **A, B1–B3, and C1–C3 are all backed by runnable projects** with verified
-output (7 projects, 28 designs). B and C were each split into three parts because
-each covered several separate skills. **Level D is not** — UVM, formal, UPF, and
-gate-level need tools this repo does not have, so its SV blocks are still
-hand-written and should be *labelled* as non-reproducible rather than fabricated.
+The appendix is **12 parts across 4 levels**: A1–A3, B1–B3, C1–C3, D1–D3. B, C, and D
+were each split into three because each covered several separate skills.
+
+**Ten of the twelve are backed by runnable projects** (A1 is a primer, D3 is reference) with verified output.
+**`ch12-silicon/` is deliberately not** — UPF, gate-level netlists,
+commercial synthesis reports, and UVM benches need tools no self-contained repo
+can ship. It opens with a boxed note saying its blocks are illustrative. Do not
+"fix" it by inventing plausible tool output; extend the honest labelling instead.
+
+Two useful tool facts, both verified: `--emit-chisel-asserts-as-sva` makes Chisel
+emit real `assert property`/`cover property` SVA, and `chisel3.ltl`
+(`AssertProperty`, `.implication`, `.delayRange`) expresses multi-cycle temporal
+properties. `@instantiable`/`@public` need `scalacOptions += "-Ymacro-annotations"`
+in build.sbt — without it you get a confusing "value io is not a member of
+Instance[X]" error.
 
 When editing any backed level, re-run `sbt "runMain Generate"` and verify each
 labelled block still matches its file line-for-line.
