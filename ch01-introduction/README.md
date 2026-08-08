@@ -75,28 +75,15 @@ working Chisel but **good hardware-description style**.
 > **Toolchain setup** (Java JDK 8–21, `sbt`, an optional IDE, and the `$`-prompt
 > convention used in the command blocks) is a one-time step covered in the
 > [tutorial index / README](../README.md#prerequisites). For building on a real
-> FPGA you also need a vendor synthesis tool — see the exercise in §1.6.
-
----
-
-## 1.1 What's in this project
-
-```
-ch01-introduction/
-├── build.sbt                         ← declares Scala + Chisel dependencies
-├── project/build.properties          ← pins the sbt version (1.12.11)
-└── src/main/scala/
-    ├── HelloScala.scala              ← plain-Scala hello (NOT hardware)
-    └── Hello.scala                   ← the blinking-LED hardware module
-```
+> FPGA you also need a vendor synthesis tool — see the exercise in §1.5.
 
 By Scala/sbt convention, application source lives under `src/main/scala/`.
 sbt finds and compiles everything there automatically — you never list files
-manually.
+manually, so every file path in this chapter starts from there.
 
 ---
 
-## 1.2 Hello World (this is Scala, *not* hardware)
+## 1.1 Hello World (this is Scala, *not* hardware)
 
 Every language book starts with "Hello World". Here is the first attempt.
 
@@ -143,7 +130,7 @@ proves your toolchain (Java + sbt + Scala) works. So what *is* a hardware
 
 ---
 
-## 1.3 The real Hello World: a blinking LED
+## 1.2 The real Hello World: a blinking LED
 
 The hardware equivalent of "Hello World" is the smallest useful, *visible*
 design: an LED that blinks. If you can make an LED blink, your whole
@@ -294,7 +281,7 @@ Try each and watch where the output goes.
 
 ---
 
-## 1.4 Running it on real hardware or in simulation (optional)
+## 1.3 Running it on real hardware or in simulation (optional)
 
 This project only *generates* the hardware; it does not include an FPGA
 project or a simulation of the LED (the book does that in the companion
@@ -310,7 +297,7 @@ project or a simulation of the LED (the book does that in the companion
 
 ---
 
-## 1.5 Recap
+## 1.4 Recap
 
 - Chisel is a Scala library that **builds** hardware; running Chisel code emits
   Verilog/SystemVerilog.
@@ -323,7 +310,7 @@ project or a simulation of the LED (the book does that in the companion
 
 ---
 
-## 1.6 Exercises
+## 1.5 Exercises
 
 These first three exercises use only this project:
 
@@ -402,7 +389,7 @@ bench and in Chapter 3.)
 
 ---
 
-## 1.7 Source access, the book, and further reading
+## 1.6 Source access, the book, and further reading
 
 **Source & the book.** This tutorial is derived from Martin Schoeberl's
 open-source book *Digital Design with Chisel*

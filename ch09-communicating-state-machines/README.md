@@ -12,21 +12,6 @@ subsystems.
 `tutorial/ch09-communicating-state-machines/`, and every command is run from
 that folder.*
 
-## What's in this project
-
-```
-ch09-communicating-state-machines/
-├── build.sbt · project/build.properties
-├── figures/
-├── src/main/scala/
-│   ├── Flasher.scala           Flasher (master + timer) and Flasher2 (+ counter)
-│   ├── PopulationCount.scala   FSMD: PopCountFSM + PopCountDataPath + top level
-│   ├── ReadyValidBuffer.scala  a one-word buffer with DecoupledIO
-│   └── Generate.scala
-└── src/test/scala/
-    ├── FlasherTest.scala · PopulationCountTest.scala · ReadyValidBufferTest.scala
-```
-
 ---
 
 ## 9.1 A light flasher

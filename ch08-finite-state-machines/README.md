@@ -18,21 +18,6 @@ This chapter builds a Moore FSM (an alarm), then contrasts **Moore** vs.
 `tutorial/ch08-finite-state-machines/`, and every command is run from that
 folder.*
 
-## What's in this project
-
-```
-ch08-finite-state-machines/
-├── build.sbt · project/build.properties
-├── figures/
-├── src/main/scala/
-│   ├── SimpleFsm.scala        Moore alarm FSM (green/orange/red)
-│   ├── RisingFsm.scala        Mealy rising-edge detector (2 states)
-│   ├── RisingMooreFsm.scala   Moore rising-edge detector (3 states)
-│   └── Generate.scala
-└── src/test/scala/
-    └── FsmTest.scala
-```
-
 ---
 
 ## 8.1 A basic (Moore) FSM

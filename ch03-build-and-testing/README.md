@@ -12,23 +12,6 @@ full power of Scala is available for writing test benches.
 *Conventions: every file path is relative to `tutorial/ch03-build-and-testing/`,
 and every command is run from that folder.*
 
-## What's in this project
-
-```
-ch03-build-and-testing/
-├── build.sbt
-├── project/build.properties
-├── figures/flow.png
-├── src/main/scala/
-│   ├── Hello.scala             the blinking LED (reused) — Verilog generation
-│   ├── mypack/pack.scala       module `Abc` in package `mypack`
-│   └── usepack.scala           three ways to use a module from another package
-└── src/test/scala/
-    ├── ExampleTest.scala       pure ScalaTest (no hardware)
-    ├── testing.scala           the DUTs + ChiselTest benches + printf
-    └── WaveformTest.scala      VCD waveform generation
-```
-
 ---
 
 ## 3.1 Building your project with sbt

@@ -127,6 +127,81 @@ When writing or reviewing a chapter, do a **superset audit** against the book:
 Whenever you touch a chapter, re-run this audit; a README that silently omits
 book content is a bug to fix, not a stylistic choice.
 
+## SystemVerilog generation
+
+Every **standalone design** in a chapter must be emitted by that chapter's
+`Generate` entry point. "Standalone" is the operative word:
+
+- **Do emit** every design the chapter discusses as a thing in its own right —
+  and in particular, when a chapter presents N variants of one design (ch05's
+  three arbiters, ch06's five counters, ch10's three `Ticker`s, ch11's five
+  FIFOs), emit **all N** at the same parameters. The generated code is the
+  evidence for the book's claim that the styles are equivalent, and a reader
+  cannot check it if only one variant is emitted.
+- **Do not emit** submodules (`Adder`, `Tx`, `Rx`, `PopCountFSM`, …). One
+  `emitVerilog` writes the whole hierarchy into one file, so a submodule is
+  already there. Emitting it separately is redundant and teaches the false model
+  that one Chisel `Module` maps to one Verilog file.
+- **Cannot be emitted:** designs the book leaves deliberately incomplete
+  (ch04's `TopLevel`/`CompA`–`CompD` have empty bodies, so their outputs are
+  undriven) and pure-Scala illustrations (ch03's `AbcUser*`). Where a design is
+  intentionally not emitted, say so in a comment in `Generate.scala` **and** in
+  the "not emitted" list at the end of `SYSTEMVERILOG-NOTES.md`.
+
+**Verilog has no namespaces.** Two Chisel classes in different Scala packages can
+emit the same module name and silently overwrite each other's `.sv` (ch11's
+top-level `BubbleFifo` vs. `fifo.BubbleFifo`). Route one family to a
+sub-directory with its own `--target-dir` and explain why in a comment.
+
+After changing any `Generate.scala`, re-run `sbt "runMain Generate"` and update
+the chapter README's list of emitted files — those lists go stale silently.
+
+## `system_verilog/` — the SystemVerilog appendix
+
+An **independent** four-level appendix (A basics → B verification → C synthesis
+→ D advanced), not tied to the book chapters. One directory per level, each
+write-up named `README.md` like the chapters.
+
+`level-a-basics/` is a full sbt project on the same pinned versions, with one
+source file per write-up section and a `Generate` entry point. **Every
+SystemVerilog block in Level A is real captured output** — the idealized,
+hand-written SV it started with was wrong in ways that mattered (`always_ff`,
+`always_comb`, `input logic`, `case` statements, and `_T_*` temporaries that
+firtool never emits).
+
+Two conventions here differ from the chapters, deliberately:
+
+- **Generated blocks DO carry a path label** (`` `generated/Adder.sv` ``),
+  unlike chapter READMEs where generated output is unlabelled. The appendix is
+  about the generated files themselves, so the reader needs to find them.
+- **Section 1 of Level A is hand-written SV on purpose** — it teaches the
+  language. It carries a blanket note saying so; do not "fix" it to match
+  generated output.
+
+Levels **A, B1–B3, and C1–C3 are all backed by runnable projects** with verified
+output (7 projects, 28 designs). B and C were each split into three parts because
+each covered several separate skills. **Level D is not** — UVM, formal, UPF, and
+gate-level need tools this repo does not have, so its SV blocks are still
+hand-written and should be *labelled* as non-reproducible rather than fabricated.
+
+When editing any backed level, re-run `sbt "runMain Generate"` and verify each
+labelled block still matches its file line-for-line.
+
+## `SYSTEMVERILOG-NOTES.md`
+
+Root-level companion to `SCALA-NOTES.md`, structured the same way (lettered
+sections, chapters link in with `[§K.1](../SYSTEMVERILOG-NOTES.md#...)`). It is
+the Chisel ↔ SystemVerilog reference: construct mappings, how to read a
+generated file, what elaboration erases, and measured diffs showing which coding
+styles produce identical hardware.
+
+Every SystemVerilog block in it is **real captured output** — same rule as the
+chapter READMEs, and it matters more here because the whole point is fidelity.
+When adding an example, generate it and paste it; do not reconstruct from
+memory. Claims about tool behavior (which flags exist, what errors look like)
+must be tested — `--strip-debug-info` is a firtool option, not a Chisel one, and
+guessing produced a documented flag that does not work.
+
 ## Version note baked into the docs
 
 The book (older Chisel) says `emitVerilog` produces `.v` (e.g. `Hello.v`).
@@ -148,6 +223,20 @@ Document `.sv` wherever the book says `.v`.
   `*illustrative*` (or an inline note) so the reader knows it isn't copied from
   a file. Every fenced Scala block must carry one label or the other.
 - **Generated Verilog/SystemVerilog blocks** are program output — no path label.
+- **No "What's in this project" file tree.** Chapters used to open with an
+  annotated directory listing; it was removed because it duplicated information
+  the reader gets in context. Chapter layouts are uniform and the names are
+  self-describing, and every file is introduced with a path label at the point
+  where it is actually discussed — which is where the reader needs it, not
+  screenfuls earlier. Do not reintroduce the tree in a new chapter.
+- **Coverage invariant (replaces the tree):** every file under
+  `src/main/scala/` must be named in the prose, or have its declared types
+  (`class`/`object`/`trait`) discussed there. Test files are accounted for in
+  aggregate in the chapter's "Build, run, and check" section — the pasted
+  `sbt test` output's `Suites: completed N` must match the number of files under
+  `src/test/scala/` — and are named individually only when the chapter discusses
+  the test itself (e.g. ch10's `ArbiterOrderTest`, all of ch13). This is
+  checkable; re-run it whenever you add or rename a source file.
 - Keep the book's **tables** (Chapter 2 has the operator table and the function
   table). When adding a chapter, cross-check `chisel-book.tex` for tables and
   reproduce any that are missing.

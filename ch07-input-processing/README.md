@@ -13,22 +13,6 @@ components, but doing it in the digital domain is more cost-efficient.
 *Conventions: every file path is relative to `tutorial/ch07-input-processing/`,
 and every command is run from that folder.*
 
-## What's in this project
-
-```
-ch07-input-processing/
-├── build.sbt · project/build.properties
-├── figures/
-├── src/main/scala/
-│   ├── Debounce.scala    Debounce (explicit) + DebounceFunc (function-based)
-│   ├── SyncReset.scala   synchronizing the reset signal
-│   ├── Counter.scala     WhenCounter (dependency of SyncReset)
-│   └── Generate.scala
-└── src/test/scala/
-    ├── DebounceTest.scala
-    └── SyncResetTest.scala
-```
-
 ---
 
 ## 7.1 Asynchronous input and the synchronizer

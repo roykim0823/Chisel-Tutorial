@@ -10,22 +10,6 @@ standards (Wishbone, AXI).
 *Conventions: every file path is relative to `tutorial/ch12-interconnect/`, and
 every command is run from that folder.*
 
-## What's in this project
-
-```
-ch12-interconnect/
-├── build.sbt · project/build.properties
-├── figures/
-├── src/main/scala/
-│   ├── soc/PipeCon.scala      the pipelined interconnect interface (Bundle)
-│   ├── fifo/fifo.scala        a small RegFifo (dependency of the bridge)
-│   ├── interconnect.scala     CounterDevice + memory-mapped RV bridge
-│   └── Generate.scala
-└── src/test/scala/
-    ├── CounterDeviceTest.scala
-    └── InterconnectTest.scala
-```
-
 ---
 
 ## 12.1 From a classic bus to an on-chip bus
@@ -317,6 +301,31 @@ first and only read/write data once TDRE/RDRF say it is safe.
 `UseMemMappedRV` connects it to a small `RegFifo` (tx → enq, deq → rx) as a
 loopback, so `InterconnectTest` can write a value and read it back through the
 status/data registers.
+
+That `RegFifo` is carried over from [Chapter 11](../ch11-example-designs/README.md#112-generalized-fifos-readyvalid--inheritance),
+and `src/main/scala/fifo/fifo.scala` here keeps just the two declarations it
+needs — the port bundle and the abstract base:
+
+`src/main/scala/fifo/fifo.scala`
+```scala
+class FifoIO[T <: Data](private val gen: T) extends Bundle {
+  val enq = Flipped(new DecoupledIO(gen))
+  val deq = new DecoupledIO(gen)
+}
+
+abstract class Fifo[T <: Data](gen: T, val depth: Int) extends Module {
+  val io = IO(new FifoIO(gen))
+  require(depth > 0, "Number of buffer elements needs to be larger than 0")
+}
+```
+
+`FifoIO` is a ready/valid port pair — an enqueue side (`Flipped`, so the FIFO
+*receives*) and a dequeue side. `Fifo` is `abstract`: it fixes the interface and
+the `depth` parameter, requires a sensible depth, and leaves the storage to a
+subclass. `RegFifo` is the one implementation kept in this chapter; Chapter 11
+develops four others against the same base. The payoff is exactly what this
+chapter is about — because the buffer is behind a standard interface, the
+memory-mapped device does not care which implementation sits behind it.
 
 ---
 

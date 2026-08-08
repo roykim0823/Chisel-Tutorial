@@ -11,19 +11,6 @@ register, then a small hierarchy of nested components, an ALU (introducing the
 *Conventions: every file path is relative to `tutorial/ch04-components/`, and
 every command is run from that folder.*
 
-## What's in this project
-
-```
-ch04-components/
-├── build.sbt · project/build.properties
-├── figures/                        chapter diagrams (PNG)
-├── src/main/scala/
-│   ├── components.scala            all modules of the chapter
-│   └── Generate.scala              emits generated/{Count10,Alu,Processor6}.sv
-└── src/test/scala/
-    └── ComponentsTest.scala        checks Count10 and the Alu
-```
-
 ---
 
 ## 4.1 Components in Chisel are modules

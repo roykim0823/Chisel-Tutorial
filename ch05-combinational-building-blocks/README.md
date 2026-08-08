@@ -11,25 +11,6 @@ named Boolean expressions and the conditional constructs `when` /
 `tutorial/ch05-combinational-building-blocks/`, and every command is run from
 that folder.*
 
-## What's in this project
-
-```
-ch05-combinational-building-blocks/
-├── build.sbt · project/build.properties
-├── figures/
-├── src/main/scala/
-│   ├── Combinational.scala   Boolean exprs + when/otherwise/elsewhen/WireDefault
-│   ├── EncDec.scala          decoder + encoder (+ generated 16-bit encoder)
-│   ├── arbiter.scala         3 arbiter styles (manual, table, generator loop)
-│   ├── Comparator.scala      equal / greater-than
-│   └── Generate.scala        emits generated/{EncDec,Arbiter3Loop,Comparator}.sv
-└── src/test/scala/
-    ├── CombinationalTest.scala
-    ├── EncDecTest.scala
-    ├── ArbiterTest.scala
-    └── ComparatorTest.scala
-```
-
 ---
 
 ## 5.1 Describing combinational circuits
@@ -453,7 +434,27 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-writes `EncDec.sv`, `Arbiter3Loop.sv`, and `Comparator.sv` into `generated/`.
+writes ten files into `generated/`: `EncDec.sv` and `Comparator.sv`; the five
+conditional-assignment forms of [§5.1](#51-describing-combinational-circuits)
+(`Combinational.sv`, `CombWhen.sv`, `CombOther.sv`, `CombElseWhen.sv`,
+`CombWireDefault.sv`); and **all three** arbiter styles of
+[§5.4](#54-arbiter) (`Arbiter3.sv`, `Arbiter3Direct.sv`, `Arbiter3Loop.sv`).
+
+All three arbiters are emitted so you can settle the question the section
+raises — do the three styles describe the same circuit? Normalize and diff:
+
+```
+$ cd generated
+$ diff <(sed 's|//.*||;s/Arbiter3Loop/M/' Arbiter3Loop.sv) \
+       <(sed 's|//.*||;s/Arbiter3/M/'     Arbiter3.sv)
+```
+
+The handwritten chain and the for-loop generator come out **identical**; the
+truth-table version becomes a lookup table instead. See
+[§K.2](../SYSTEMVERILOG-NOTES.md#k2-arbiters-generator-vs-handwritten-vs-truth-table)
+for the full comparison, and
+[`SYSTEMVERILOG-NOTES.md`](../SYSTEMVERILOG-NOTES.md) for what the rest of the
+generated code means.
 
 ---
 

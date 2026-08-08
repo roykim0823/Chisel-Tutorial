@@ -21,22 +21,6 @@ folder.*
 > constants. The excluded pieces are described below; read the full design in the
 > [Leros repository](https://github.com/leros-dev/leros).
 
-## What's in this project
-
-```
-ch14-design-of-a-processor/
-├── build.sbt · project/build.properties
-├── figures/leros-datapath.png
-├── src/main/scala/
-│   ├── leros/shared/shared.scala   opcode + ALU-op constants (shared)
-│   ├── leros/AluAccu.scala         the ALU with the accumulator register
-│   ├── leros/Decode.scala          the instruction decoder
-│   ├── leros/DataMem.scala         the byte-addressable data memory
-│   └── Generate.scala
-└── src/test/scala/leros/
-    └── AluAccuTest.scala           ALU vs. a Scala reference model
-```
-
 ---
 
 ## 14.1 The instruction set (ISA)

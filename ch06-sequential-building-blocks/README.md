@@ -17,25 +17,6 @@ folder.*
 > cycle-by-cycle behavior. You can always produce a real waveform yourself with
 > `WriteVcdAnnotation` (see Chapter 3) and view the `.vcd` in GTKWave.
 
-## What's in this project
-
-```
-ch06-sequential-building-blocks/
-├── build.sbt · project/build.properties
-├── figures/
-├── src/main/scala/
-│   ├── Registers.scala      register forms (RegInit, RegNext, ...)
-│   ├── Counter.scala        Count100 + 5 counter styles (abstract Counter base)
-│   ├── Timer.scala          one-shot down-counter timer
-│   ├── Pwm.scala            PWM generator function + LED fade modulation
-│   ├── ShiftRegister.scala  delay / serial-in-parallel-out / parallel-in-serial-out
-│   ├── memory.scala         SyncReadMem: plain, forwarding, write-first
-│   └── Generate.scala       emits SystemVerilog for the modules
-└── src/test/scala/
-    ├── RegisterTest.scala · CounterTest.scala · TimerTest.scala
-    ├── ShiftRegisterTest.scala · PwmTest.scala · MemoryTest.scala
-```
-
 ---
 
 ## 6.1 Registers
@@ -589,8 +570,30 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-writes `Registers.sv`, `WhenCounter.sv`, `Timer.sv`, `Pwm.sv`,
-`ShiftRegister.sv`, `Memory.sv`, and `ForwardingMemory.sv` into `generated/`.
+writes thirteen files into `generated/`: `Registers.sv`, `Count100.sv`,
+`Timer.sv`, `Pwm.sv`, `ShiftRegister.sv`; **all five** counter styles of
+[§6.2](#62-counters) (`WhenCounter.sv`, `MuxCounter.sv`, `DownCounter.sv`,
+`FunctionCounter.sv`, `NerdCounter.sv`), all at `n = 10` so they can be compared
+directly; and all three memory behaviors of [§6.6](#66-memory) (`Memory.sv`,
+`ForwardingMemory.sv`, `MemoryWriteFirst.sv`).
+
+The five counters are emitted together because their generated SystemVerilog
+answers the question §6.2 raises — which of these styles actually change the
+hardware?
+
+```
+$ cd generated
+$ diff <(sed 's|//.*||;s/WhenCounter/M/' WhenCounter.sv) \
+       <(sed 's|//.*||;s/MuxCounter/M/'  MuxCounter.sv)
+```
+
+`when` and `Mux` produce **identical** output. `DownCounter` and `NerdCounter`
+genuinely differ — counting toward zero lets firtool infer a *4-bit* register
+instead of 8, and the sign-bit trick removes the comparator altogether. The full
+comparison is in
+[§K.1](../SYSTEMVERILOG-NOTES.md#k1-counters-five-styles-three-distinct-circuits);
+[`SYSTEMVERILOG-NOTES.md`](../SYSTEMVERILOG-NOTES.md) also explains the
+randomization preamble and the `initial` blocks you will see in these files.
 
 ---
 

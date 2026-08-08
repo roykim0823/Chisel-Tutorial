@@ -32,26 +32,6 @@ and every command is run from that folder.*
 > `StandardFive`/`WildFour`/`ThreeCats` co-simulation test suite) lives in the
 > [Wildcat GitHub repo](https://github.com/schoeberl/wildcat).
 
-## What's in this project
-
-```
-ch15-a-risc-v-pipeline/
-├── build.sbt · project/build.properties
-├── figures/wildcat.png
-├── src/main/scala/
-│   ├── wildcat/defines.scala                 ISA constants + AluType/InstrType enums
-│   └── wildcat/pipeline/
-│       ├── connections.scala                 InstrIO / MemIO / DecodedInstr bundles
-│       ├── Wildcat.scala                      abstract top level
-│       ├── Functions.scala                    decode / alu / compare / regfile / ...
-│       ├── ThreeCats.scala                    the 3-stage pipelined CPU
-│       ├── InstructionROM.scala               preloaded instruction memory
-│       ├── Csr.scala                          control & status registers
-│       └── FunctionWrappers.scala             (tutorial) AluModule / DecodeModule
-├── src/main/scala/Generate.scala
-└── src/test/scala/wildcat/WildcatTest.scala
-```
-
 ---
 
 ## 15.1 The RV32I ISA in brief

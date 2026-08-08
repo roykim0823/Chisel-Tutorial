@@ -10,24 +10,6 @@ buffer) — with an end-to-end loopback test.
 *Conventions: every file path is relative to `tutorial/ch11-example-designs/`,
 and every command is run from that folder.*
 
-## What's in this project
-
-```
-ch11-example-designs/
-├── build.sbt · project/build.properties
-├── figures/fifo.png
-├── src/main/scala/
-│   ├── BubbleFifo.scala        bubble FIFO with a custom write/full read/empty interface
-│   ├── fifo/fifo.scala         generalized ready/valid FIFOs (5 implementations)
-│   ├── uart/uart.scala         UART: Tx, Rx, Buffer, BufferedTx, Sender, Echo
-│   ├── uart/UartLoopback.scala Tx->Rx loopback (tutorial helper for testing)
-│   └── Generate.scala
-└── src/test/scala/
-    ├── BubbleFifoTest.scala
-    ├── fifo/FifoTest.scala
-    └── uart/UartTest.scala
-```
-
 ---
 
 ## 11.1 A bubble FIFO
@@ -363,8 +345,23 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-emits `BubbleFifo.sv`, `MemFifo.sv`, `DoubleBufferFifo.sv`, and `Sender.sv`
-into `generated/`.
+emits into `generated/`: the custom-interface `BubbleFifo.sv`, and the three
+UART tops `Sender.sv`, `Echo.sv`, and `UartLoopback.sv`.
+
+**All five** ready/valid FIFOs of [§11.2](#112-generalized-fifos-readyvalid--inheritance)
+go into `generated/fifo/` — `BubbleFifo.sv`, `DoubleBufferFifo.sv`,
+`RegFifo.sv`, `MemFifo.sv`, `CombFifo.sv` — all at `UInt(16.W)` so their
+generated code is comparable. They need their own folder because
+`fifo.BubbleFifo` emits a Verilog module named `BubbleFifo`, exactly like the
+custom-interface one: Scala packages keep the two apart, but **Verilog has no
+namespaces**, so in one directory the second would overwrite the first. That is
+a real hazard worth remembering whenever you emit a design whose module names
+you do not fully control — see
+[`SYSTEMVERILOG-NOTES.md` §A.1](../SYSTEMVERILOG-NOTES.md#a1-emitverilog-and-the-target-directory).
+
+Because all five share `FifoIO`, their emitted ports are identical and only the
+storage and pointer logic differ — which is the whole argument for the abstract
+base class.
 
 ---
 

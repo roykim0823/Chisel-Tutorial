@@ -16,12 +16,18 @@ object Generate extends App {
   // Name -> how to build it. The right-hand side is a function value, so a
   // design is only elaborated once it has been selected.
   val designs: Seq[(String, () => Unit)] = Seq(
+    "FunctionalComp" -> (() => emitVerilog(new FunctionalComp(), opts)),
+    "FunctionalAdd" -> (() => emitVerilog(new FunctionalAdd(), opts)),
     "BcdTable" -> (() => emitVerilog(new BcdTable(), opts)),
     "GenHardware" -> (() => emitVerilog(new GenHardware(), opts)),
     "UseAdder" -> (() => emitVerilog(new UseAdder(), opts)),   // ParamAdder(8) and (16)
     "ParamFunc" -> (() => emitVerilog(new ParamFunc(), opts)),
     "FunctionalMin" -> (() => emitVerilog(new FunctionalMin(5, 8), opts)),
+    // All three Ticker implementations of Section 10.5: same abstract base and
+    // the same interface, three different bodies.
     "UpTicker" -> (() => emitVerilog(new UpTicker(5), opts)),
+    "DownTicker" -> (() => emitVerilog(new DownTicker(5), opts)),
+    "NerdTicker" -> (() => emitVerilog(new NerdTicker(5), opts)),
     "ArbiterTree" -> (() => emitVerilog(new ArbiterTree(4, UInt(8.W)), opts)),  // 4:1 tree
     "UseParamRouter" -> (() => emitVerilog(new UseParamRouter(), opts)),
     "UseParamRouter2" -> (() => emitVerilog(new UseParamRouter2(), opts)),

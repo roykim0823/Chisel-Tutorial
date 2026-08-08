@@ -24,21 +24,6 @@ property for *all* inputs, up to a bound — §13.4).
 `tutorial/ch13-debugging-testing-verification/`, and every command is run from
 that folder. This chapter has no figures.*
 
-## What's in this project
-
-```
-ch13-debugging-testing-verification/
-├── build.sbt · project/build.properties
-├── src/main/scala/
-│   ├── Assert.scala    an adder with a Chisel assert
-│   ├── Boring.scala    a tick generator + a BoringUtils test wrapper
-│   └── Generate.scala
-└── src/test/scala/
-    ├── AssertTest.scala   assertions during simulation
-    ├── BoringTest.scala   observing an internal counter
-    └── TagTest.scala      tagging tests for selection
-```
-
 ---
 
 ## 13.1 Debugging
@@ -240,6 +225,129 @@ does **not officially support multiple clocks**. VCS is **event-based** and
 supports all synthesizable Verilog constructs, including latches and multiple
 clocks, at the cost of being closed-source/commercial. For single-clock
 circuits, Verilator is generally the fastest and most widely available choice.
+
+### Which artifact are your tests actually running?
+
+There is a more fundamental difference between the backends than speed, and it
+is easy to miss: **Treadle and Verilator do not simulate the same thing.**
+
+| backend | what it executes | is your SystemVerilog involved? |
+|---|---|---|
+| **Treadle** (default) | the **FIRRTL** intermediate representation, interpreted on the JVM | **no** |
+| **Verilator** / **VCS** | the **generated SystemVerilog**, compiled to a binary | **yes** |
+
+Treadle never produces Verilog at all. You can see this directly — run this
+chapter's tests and look at what is left behind in `test_run_dir/`:
+
+```
+$ sbt test
+$ find test_run_dir -type f
+test_run_dir/Assert_should_hold_even_across_an_overflowing_add/Assert.lo.fir
+test_run_dir/Boring_should_expose_the_internal_counter/TickGenTestTop.lo.fir
+```
+
+Only `.lo.fir` files — *lowered FIRRTL*. Not one `.sv`. (Chapter 5 gives the
+same picture at larger scale: eleven `.lo.fir`, zero `.sv`.)
+
+**Why this matters.** FIRRTL is the stage *before* firtool does its work, and
+firtool changes the design substantially: it eliminates registers nothing reads,
+narrows arithmetic when the extra bits cannot be observed, and turns `when`
+chains and `switch` statements into lookup tables. Chapter 6's `Registers`
+module declares four registers and emits one; Chapter 5's `Arbiter3Direct`
+becomes a packed array rather than a gate chain. See
+[`SYSTEMVERILOG-NOTES.md`](../SYSTEMVERILOG-NOTES.md) for the measured examples.
+
+So "the tests passed" means **the FIRRTL passed**. In practice the lowering is
+semantics-preserving and heavily tested, so this rarely bites — but the two are
+different artifacts, and if you want the shipped RTL exercised, you must ask for
+it by switching the backend. That is a one-line change and the *same test code*
+runs either way:
+
+```scala
+test(new Dut()).withAnnotations(Seq(VerilatorBackendAnnotation)) { c => testFun(c) }
+```
+
+This is the point worth internalizing: **you do not write a SystemVerilog
+testbench to test the generated SystemVerilog.** Your existing `poke`/`step`/
+`expect` test drives the real emitted RTL; only the backend changes.
+
+Chisel 6 also ships a second, newer path — `chisel3.simulator` (svsim) — which
+always goes through generated SystemVerilog, with no FIRRTL-interpreter option:
+
+```scala
+import chisel3.simulator.EphemeralSimulator._
+
+simulate(new Comparator()) { dut =>
+  dut.io.a.poke(3.U); dut.io.b.poke(3.U); dut.clock.step()
+  dut.io.equ.expect(true.B)
+}
+```
+*illustrative — the svsim path, which always compiles the SystemVerilog*
+
+> **Version warning, verified on this toolchain.** Neither Verilog-level path
+> runs against **Verilator 5.050**, which is much newer than the pinned Chisel
+> 6.5.0 / chiseltest 6.0.0. Two independent failures:
+>
+> - `VerilatorBackendAnnotation` → `error: unknown type name 'WData'` while
+>   compiling chiseltest's C++ harness (Verilator changed that API).
+> - `EphemeralSimulator` → `java.lang.Exception: Unexpected message: Ready`
+>   (the simulator binary builds and starts, then the handshake protocol
+>   mismatches).
+>
+> Both are version skew, not design problems — the Verilog itself is fine. If
+> you need the Verilog-level path, pair the pinned Chisel with a Verilator from
+> the same era, or move to a newer Chisel/chiseltest. The chapters here all pass
+> on Treadle, which is why the tutorial does not require Verilator.
+
+### How this scales up: verifying a real design
+
+Unit tests against a reference model — Chapter 14 checks `AluAccu` against a
+plain-Scala `alu` function — are the bottom of a ladder that real projects
+climb. It is worth knowing the rest of it, because **from the second rung up,
+everything runs on the generated Verilog, not on Chisel**:
+
+1. **Unit tests vs. a reference model** — Chapter 14's approach. The only rung
+   that lives in Chisel-land.
+2. **ISA test suites** — for a RISC-V core, `riscv-tests` (`rv32ui-p-add` and
+   friends) compiled to ELF, loaded into the core's memory, run on the RTL
+   simulation.
+3. **Architectural compliance** — RISCOF / `riscv-arch-test` run the same
+   program on the design and on a golden model (Sail, Spike) and compare
+   signature dumps.
+4. **Co-simulation** — run the core and an ISA simulator in lockstep and compare
+   every committed instruction. Chapter 15's Wildcat does exactly this against a
+   Scala ISA model in its [own repository](https://github.com/schoeberl/wildcat);
+   Chipyard uses Dromajo for Rocket and BOOM.
+5. **Formal** — `riscv-formal` defines an interface (RVFI) that cores expose so
+   SystemVerilog properties can be model-checked (§13.4 covers the Chisel side).
+6. **UVM** — the industry bench style: constrained-random stimulus, scoreboards,
+   coverage closure. OpenHW's `core-v-verif` is the well-known open example.
+7. **FPGA emulation and booting Linux** — the ultimate smoke test.
+8. **Post-synthesis** — gate-level simulation and logical equivalence checking.
+
+The reason this works is that from step 2 onward the tests consume **RTL plus a
+binary** — nothing about them knows the core was written in Chisel. That is why
+Rocket Chip (Chisel) and CVA6 (SystemVerilog) can share `riscv-tests`, and it is
+the strongest practical evidence that the Chisel → SystemVerilog lowering is
+trustworthy: your generated Verilog is checked by the same suite that checks
+hand-written cores.
+
+**When you do still write SystemVerilog test code.** Chisel test code covers
+module-level verification well, but not everything:
+
+- running software on a core (loading an ELF and simulating for millions of
+  cycles) is normally driven by a C++ or SV harness for speed;
+- UVM has no Chisel equivalent;
+- multi-cycle **SVA** properties (`|->`, `##1`, `throughout`) are not
+  expressible as Chisel `assert`s, which are immediate assertions;
+- after synthesis there is no Chisel and no FIRRTL — gate-level simulation runs
+  on a netlist, so the testbench must be SV or C++;
+- if your organization's verification environment is SV/UVM, your block is a DUT
+  inside it.
+
+Levels [B3](../system_verilog/level-b3-printf-assert-pipeline/README.md) and
+[D](../system_verilog/level-d-advanced/README.md) of the
+[SystemVerilog appendix](../system_verilog/README.md) cover that territory.
 
 ---
 

@@ -298,6 +298,22 @@ Click a chapter to open its walkthrough.
 > tutorial. Read it once up front, then dip back in whenever a chapter uses
 > syntax you don't recognize.
 
+> **Coming from Verilog or VHDL — or just want to see what Chisel built?**
+> [`SYSTEMVERILOG-NOTES.md`](SYSTEMVERILOG-NOTES.md) is the Chisel ↔
+> SystemVerilog reference: what each construct becomes, which parts of a
+> generated file are hardware and which are simulation scaffolding, and
+> side-by-side diffs showing which coding styles produce *identical* circuits
+> (`when` vs. `Mux`, a for-loop generator vs. a handwritten chain) and which do
+> not. Every example is real captured output from these chapters.
+
+> **Working in SystemVerilog professionally?** The
+> [`system_verilog/`](system_verilog/README.md) appendix is a four-level track
+> that goes well beyond the book: reading generated SV (A), waveform/`printf`/
+> `assert` debugging and the FIRRTL pipeline (B), latch inference, clock gating,
+> CDC, `BlackBox`, and SDC (C), and coverage, UVM, formal, and EDA-tool practice
+> (D). Independent of the chapters — start it whenever the flow around your
+> Chisel starts mattering more than the Chisel itself.
+
 
 ---
 

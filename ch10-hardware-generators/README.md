@@ -14,35 +14,6 @@ The book's Chapter 10 has no figures; the arbiter timing diagrams in
 [§10.6.2](#1062-an-arbitration-tree) are additions of this tutorial, recorded from real
 simulation runs.*
 
-## What's in this project
-
-```
-ch10-hardware-generators/
-├── build.sbt · project/build.properties
-├── figures/                arbiter timing diagrams
-├── src/main/scala/
-│   ├── FunctionalComp.scala a function returning two values in a tuple
-│   ├── FunctionalAdd.scala  summing a Vec with reduce/reduceTree
-│   ├── FunctionalMin.scala  min-search four ways, a pure-Scala reference model,
-│   │                        the four split one per module (+ FunctionalMinDemo:
-│   │                        emits and measures them)
-│   ├── BcdTable.scala      binary -> BCD table generated with a Scala loop
-│   ├── GenHardware.scala   VecInit ROM tables (a string, a square table)
-│   ├── ParamAdder.scala    width parameter + two instances
-│   ├── Config.scala         case classes for parameters (+ ConfigDemo)
-│   ├── ParamFunc.scala      a mux parameterized by a Chisel TYPE
-│   ├── ParamModule.scala    a MODULE parameterized by a Chisel type (router + payload)
-│   ├── ParamBundle.scala    a BUNDLE parameterized by a Chisel type (+ PortDemo: the three parameter spellings)
-│   ├── RegisterFile.scala   optional debug port via Scala's Option
-│   ├── Ticker.scala         abstract base + three implementations (inheritance)
-│   ├── ArbiterTree.scala    reduceTree arbitration tree: fair and priority 2:1
-│   ├── ArbiterVariants.scala  the same arbiter written three other ways, to
-│   │                        study whether `when` order matters (+ its emitter)
-│   └── Generate.scala      emits .sv for every design, or just the ones you name
-└── src/test/scala/  (one test per topic, plus ArbiterWaveTest: records .vcd
-                     waveforms, and ArbiterOrderTest: does `when` order matter?)
-```
-
 ---
 
 ## 10.1 A little Scala
@@ -1937,11 +1908,18 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-emits ten files **into `generated/`**: `BcdTable.sv`, `GenHardware.sv`,
-`UseAdder.sv`, `ParamFunc.sv`, `FunctionalMin.sv`, `UpTicker.sv`,
+emits fourteen files **into `generated/`**: `FunctionalComp.sv`,
+`FunctionalAdd.sv`, `BcdTable.sv`, `GenHardware.sv`, `UseAdder.sv`,
+`ParamFunc.sv`, `FunctionalMin.sv`, **all three** `Ticker` implementations of
+[§10.5](#105-inheritance) (`UpTicker.sv`, `DownTicker.sv`, `NerdTicker.sv`),
 `ArbiterTree.sv` (the generated 4:1 arbitration tree), `UseParamRouter.sv` /
 `UseParamRouter2.sv` (the two type-parameterized routers), and `RegisterFile.sv`
 (built with `debug = false`, so with no debug port).
+
+`BcdTable.sv` is the one to open first: the Scala `for` loop that builds the
+table is nowhere in it, replaced by a fully expanded constant array. That is
+this chapter's thesis in a single file — see
+[`SYSTEMVERILOG-NOTES.md` §J](../SYSTEMVERILOG-NOTES.md#j-what-elaboration-erases).
 
 **Where the output goes.** `emitVerilog` would drop every file in the project
 root; `Generate` passes `--target-dir` so they are collected in one folder

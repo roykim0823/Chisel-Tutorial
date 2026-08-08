@@ -20,21 +20,6 @@ digital circuit is made:
 2. **Registers** (state) — outputs depend on inputs *and* the past
    (flip-flops that update on the clock edge).
 
-## What's in this project
-
-```
-ch02-basic-components/
-├── build.sbt
-├── project/build.properties
-├── src/main/scala/
-│   ├── Logic.scala           ← combinational features, all in one module
-│   ├── RegisterFile.scala    ← registers, Vec, Bundle, a 32×32 register file
-│   └── Generate.scala        ← entry point: emits SystemVerilog for both
-└── src/test/scala/
-    ├── LogicTest.scala        ← checks Logic's outputs
-    └── RegisterFileTest.scala ← checks the register file
-```
-
 Two of the book's example files anchor this chapter:
 `src/main/scala/Logic.scala` (all the combinational examples) and
 `src/main/scala/RegisterFile.scala` (registers/`Vec`/`Bundle`). Smaller
