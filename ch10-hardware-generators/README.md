@@ -1984,9 +1984,10 @@ The selection is nothing fancier than a `Seq` of name → *function value* pairs
 wrapping each `emitVerilog` in `() => …` is what keeps an unselected design from
 being elaborated when the `Seq` is built:
 
-*illustrative — the first entries of the table in `src/main/scala/Generate.scala`*
+`src/main/scala/Generate.scala`
 ```scala
   val designs: Seq[(String, () => Unit)] = Seq(
+    ...
     "BcdTable" -> (() => emitVerilog(new BcdTable(), opts)),
     "GenHardware" -> (() => emitVerilog(new GenHardware(), opts)),
     "UseAdder" -> (() => emitVerilog(new UseAdder(), opts)),   // ParamAdder(8) and (16)
@@ -2094,6 +2095,8 @@ blocks come first:
 
 `src/main/scala/ArbiterVariants.scala`
 ```scala
+  def arbitrateSimpSwapped[T <: Data](a: DecoupledIO[T], b: DecoupledIO[T]): DecoupledIO[T] = {
+    ...
     // ---- capture FIRST (in arbitrateSimp this block comes second) ----------
     when (regReadyA) {
       regData := a.bits
