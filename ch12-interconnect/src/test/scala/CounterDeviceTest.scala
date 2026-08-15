@@ -1,8 +1,39 @@
 import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
+import soc._
 
 class CounterDeviceTest extends AnyFlatSpec with ChiselScalatestTester {
+
+  // "Bit banging": every pin of the protocol is poked and expected by hand.
+  // It works, but it covers only a couple of cases and is already hard to read.
+  "CounterDevice" should "work" in {
+    test(new CounterDevice()) { dut =>
+      dut.io.ack.expect(false.B)
+      dut.clock.step()
+      dut.io.address.poke(0.U)
+      dut.io.rd.poke(true.B)
+      dut.io.ack.expect(false.B)
+      dut.clock.step()
+      dut.io.rd.poke(false.B)
+      dut.io.ack.expect(true.B)
+      dut.clock.step(100)
+      dut.io.rd.poke(true.B)
+      dut.io.address.poke(4.U)
+      dut.clock.step()
+      assert(dut.io.rdData.peekInt() > 100)
+      dut.io.wr.poke(true.B)
+      dut.io.wrData.poke(0.U)
+      dut.clock.step()
+      dut.io.wr.poke(false.B)
+      dut.io.rd.poke(true.B)
+      dut.clock.step()
+      dut.io.rdData.expect(1.U)
+      dut.io.address.poke(0.U)
+      dut.clock.step()
+      assert(dut.io.rdData.peekInt() > 100)
+    }
+  }
 
   // A readable test that wraps the pipelined protocol in read()/write() helpers.
   "CounterDevice" should "read, advance, and load counters" in {

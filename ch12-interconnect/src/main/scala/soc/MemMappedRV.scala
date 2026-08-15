@@ -1,50 +1,20 @@
+package soc
+
 import chisel3._
 import chisel3.util._
 import fifo._
-import soc._
-
-// An IO device with four free-running loadable counters, speaking the PipeCon
-// pipelined interface. A read result arrives the cycle AFTER the command, so we
-// register the address (addrReg) and delay the ack (ackReg).
-class CounterDevice extends Module {
-  val io = IO(new PipeCon(4))
-
-  val ackReg = RegInit(false.B)
-  val addrReg = RegInit(0.U(2.W))
-  val cntRegs = RegInit(VecInit(Seq.fill(4)(0.U(32.W))))
-
-  ackReg := io.rd || io.wr
-  when(io.rd) {
-    addrReg := io.address(3, 2)   // byte address -> which 32-bit counter
-  }
-  io.rdData := cntRegs(addrReg)
-
-  for (i <- 0 until 4) {
-    cntRegs(i) := cntRegs(i) + 1.U
-  }
-  when (io.wr) {
-    cntRegs(io.address(3, 2)) := io.wrData
-  }
-
-  io.ack := ackReg
-}
-
-// A memory-mapped register interface (simpler than PipeCon here).
-class MemoryMappedIO extends Bundle {
-  val address = Input(UInt(4.W))
-  val rd = Input(Bool())
-  val wr = Input(Bool())
-  val rdData = Output(UInt(32.W))
-  val wrData = Input(UInt(32.W))
-  val ack = Output(Bool())
-}
 
 // Bridge a memory-mapped bus to a ready/valid (Decoupled) streaming device,
 // like a UART. Address 0 = status register (tx-ready | rx-valid), address 1 =
 // data (read = receive, write = transmit). Classic PC serial-port style.
+//
+// It speaks the pipelined handshake over the same `ReqAckIO` port as
+// `CounterDevice`: a single-cycle `rd`/`wr`, answered one cycle later by
+// `ackReg`. `wrMask` goes unused -- this device moves whole words between the
+// bus and a byte stream, so there is no sub-word write to mask.
 class MemMappedRV[T <: Data](gen: T, block: Boolean = false) extends Module {
   val io = IO(new Bundle() {
-    val mem = new MemoryMappedIO()
+    val mem = new ReqAckIO(4)
     val tx = Decoupled(gen)
     val rx = Flipped(Decoupled(gen))
   })
@@ -77,7 +47,7 @@ class MemMappedRV[T <: Data](gen: T, block: Boolean = false) extends Module {
 // enq is fed by tx — a loopback so we can test the bridge.
 class UseMemMappedRV[T <: Data](gen: T) extends Module {
   val io = IO(new Bundle() {
-    val mem = new MemoryMappedIO()
+    val mem = new ReqAckIO(4)
   })
 
   val memDevice = Module(new MemMappedRV(gen))

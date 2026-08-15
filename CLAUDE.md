@@ -177,13 +177,15 @@ Two conventions here differ from the chapters, deliberately:
 - **Generated blocks DO carry a path label** (`` `generated/Adder.sv` ``),
   unlike chapter READMEs where generated output is unlabelled. The appendix is
   about the generated files themselves, so the reader needs to find them.
-- **A1 is hand-written SV on purpose** — it teaches the language. It carries a
+- **Chapter 1 is hand-written SV on purpose** — it teaches the language. It carries a
   blanket note saying so; do not "fix" it to match generated output.
 
-The appendix is **12 parts across 4 levels**: A1–A3, B1–B3, C1–C3, D1–D3. B, C, and D
-were each split into three because each covered several separate skills.
+The appendix is **12 numbered chapters** (`ch01-syntax` … `ch12-silicon`), grouped
+into four parts in its index: Basics (1–3), Debugging (4–6), Synthesis (7–9),
+At Scale (10–12). Note these are the *appendix's* chapters — distinct from the
+book chapters at the repo root, and namespaced by living under `system_verilog/`. Each part is three chapters, because each covered several separate skills.
 
-**Ten of the twelve are backed by runnable projects** (A1 is a primer, D3 is reference) with verified output.
+**Ten of the twelve are backed by runnable projects** (ch01 is a primer, ch12 is reference) with verified output.
 **`ch12-silicon/` is deliberately not** — UPF, gate-level netlists,
 commercial synthesis reports, and UVM benches need tools no self-contained repo
 can ship. It opens with a boxed note saying its blocks are illustrative. Do not

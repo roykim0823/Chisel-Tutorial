@@ -1889,12 +1889,13 @@ To add a scenario of your own, copy one of the eight tests and change the
 $ sbt test
 ```
 
-Expected tail (50 tests across 14 suites):
+Expected tail (51 tests across 15 suites — `BcdTableTest.scala` holds two
+suites, the `should` form and the `behavior of` form):
 
 ```
-[info] Total number of tests run: 50
-[info] Suites: completed 14, aborted 0
-[info] Tests: succeeded 50, failed 0, canceled 0, ignored 0, pending 0
+[info] Total number of tests run: 51
+[info] Suites: completed 15, aborted 0
+[info] Tests: succeeded 51, failed 0, canceled 0, ignored 0, pending 0
 [info] All tests passed.
 ```
 

@@ -1,8 +1,9 @@
 import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
+import soc._
 
-class InterconnectTest extends AnyFlatSpec with ChiselScalatestTester {
+class MemMappedRVTest extends AnyFlatSpec with ChiselScalatestTester {
   "MemMappedRV bridge" should "expose status and move data through the FIFO" in {
     test(new UseMemMappedRV(UInt(16.W))) { dut =>
       def step(n: Int = 1) = dut.clock.step(n)
