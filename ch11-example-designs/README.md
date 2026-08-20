@@ -135,7 +135,53 @@ shortcut.
 Because they share `FifoIO`, **one generic test drives them all**
 (`src/test/scala/fifo/FifoTest.scala`, `def testFn[T <: Fifo[_ <: Data]]`),
 checking a single transfer, fill/drain in order, and a full-throughput speed
-test. The double-buffer stage shows how to stay `ready` while full without
+test. Each of the four tests attaches `WriteVcdAnnotation`, so the same stimulus
+leaves four comparable traces under `test_run_dir/` — see
+[Comparing the four FIFOs in a waveform](#comparing-the-four-fifos-in-a-waveform).
+The speed test prints its measurement, which is the sharpest summary of the
+difference between the implementations:
+
+```
+[wave] BubbleFifo       ->  50 words in 100 cycles (2.00 cycles/word)
+[wave] DoubleBufferFifo -> 100 words in 100 cycles (1.00 cycles/word)
+[wave] MemFifo          ->  53 words in 100 cycles (1.89 cycles/word)
+[wave] RegFifo          -> 100 words in 100 cycles (1.00 cycles/word)
+```
+
+`BubbleFifo` is held to one word every two cycles exactly as predicted above;
+`DoubleBufferFifo` and `RegFifo` sustain a word per cycle. `MemFifo` also pays
+the two-cycle penalty, but it accepts one word more than the others before
+`enq.ready` drops (5 rather than 4), because the register on the memory's read
+port holds a word beyond the four memory slots.
+
+### Comparing the four FIFOs in a waveform
+
+Since all four tests run the *same* stimulus, the traces can be put side by side.
+Each test writes its own file under `test_run_dir/`:
+
+```
+test_run_dir/BubbleFifo_should_pass_the_generic_test_and_record_a_waveform/BubbleFifo.vcd
+test_run_dir/DoubleBufferFifo_should_pass_the_generic_test_and_record_a_waveform/DoubleBufferFifo.vcd
+test_run_dir/MemFifo_should_pass_the_generic_test_and_record_a_waveform/MemFifo.vcd
+test_run_dir/RegFifo_should_pass_the_generic_test_and_record_a_waveform/RegFifo.vcd
+```
+
+Open one with GTKWave (or Surfer):
+
+```
+$ gtkwave test_run_dir/BubbleFifo_should_pass_the_generic_test_and_record_a_waveform/BubbleFifo.vcd
+```
+
+The dump includes the **internal modules and registers**, not just the ports —
+the bubble FIFO's four `Buffer` instances are all there, so a word can be
+followed from stage to stage. Three things are worth looking for, in the order
+the test drives them: how many cycles pass between `enq.valid` and the first
+`deq.valid` (0 for `RegFifo`, 3 for `BubbleFifo`); how many words go in before
+`enq.ready` falls; and whether `deq.valid` stays high through the drain or
+pulses every other cycle. (`test_run_dir/` is in `.gitignore`, so the traces stay
+local.)
+
+The double-buffer stage shows how to stay `ready` while full without
 creating a combinational path between the two handshakes:
 
 `src/main/scala/fifo/fifo.scala`
@@ -335,9 +381,14 @@ $ sbt test
 Expected tail (7 tests):
 
 ```
+[info] Suites: completed 3, aborted 0
 [info] Tests: succeeded 7, failed 0, canceled 0, ignored 0, pending 0
 [info] All tests passed.
 ```
+
+Note that `sbt test` also runs `FifoTest`, which leaves four `.vcd` traces under
+`test_run_dir/` — see
+[Comparing the four FIFOs in a waveform](#comparing-the-four-fifos-in-a-waveform).
 
 Generate SystemVerilog:
 
