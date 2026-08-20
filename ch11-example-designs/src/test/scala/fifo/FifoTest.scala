@@ -5,6 +5,16 @@ import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 
 // One generic test drives every FIFO implementation through its FifoIO.
+//
+// Every test below attaches WriteVcdAnnotation, so each one drops a .vcd under
+// test_run_dir/<test name>/ that can be opened in GTKWave (or Surfer).
+//
+//   sbt "testOnly fifo.FifoTest"
+//
+// Because all four run the SAME stimulus, the four traces can be put side by
+// side to see where the implementations differ: how long a single word takes to
+// appear, how many words fit before `enq.ready` drops, and whether the drain
+// and speed phases move a word every cycle or only every other one.
 class FifoTest extends AnyFlatSpec with ChiselScalatestTester {
   def testFn[T <: Fifo[_ <: Data]](dut: T) = {
     dut.io.enq.bits.asUInt.poke(0xab.U)
@@ -64,11 +74,23 @@ class FifoTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.clock.step()
     }
     val cycles = 100.0 / cnt
+    println(f"[wave] ${dut.getClass.getSimpleName}%-16s -> $cnt%3d words in 100 cycles ($cycles%.2f cycles/word)")
     assert(cycles >= 0.99, "Cannot be faster than one clock cycle per word")
   }
 
-  "BubbleFifo" should "pass" in { test(new BubbleFifo(UInt(16.W), 4)) { dut => testFn(dut) } }
-  "DoubleBufferFifo" should "pass" in { test(new DoubleBufferFifo(UInt(16.W), 4)) { dut => testFn(dut) } }
-  "MemFifo" should "pass" in { test(new MemFifo(UInt(16.W), 4)) { dut => testFn(dut) } }
-  "RegFifo" should "pass" in { test(new RegFifo(UInt(16.W), 4)) { dut => testFn(dut) } }
+  "BubbleFifo" should "pass the generic test and record a waveform" in {
+    test(new BubbleFifo(UInt(16.W), 4)).withAnnotations(Seq(WriteVcdAnnotation)) { dut => testFn(dut) }
+  }
+
+  "DoubleBufferFifo" should "pass the generic test and record a waveform" in {
+    test(new DoubleBufferFifo(UInt(16.W), 4)).withAnnotations(Seq(WriteVcdAnnotation)) { dut => testFn(dut) }
+  }
+
+  "MemFifo" should "pass the generic test and record a waveform" in {
+    test(new MemFifo(UInt(16.W), 4)).withAnnotations(Seq(WriteVcdAnnotation)) { dut => testFn(dut) }
+  }
+
+  "RegFifo" should "pass the generic test and record a waveform" in {
+    test(new RegFifo(UInt(16.W), 4)).withAnnotations(Seq(WriteVcdAnnotation)) { dut => testFn(dut) }
+  }
 }
