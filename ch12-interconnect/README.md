@@ -1,61 +1,83 @@
 # Chapter 12 — Interconnect
 
 Larger systems are built by connecting components, and **interconnect** defines
-how. This chapter starts from the classic microprocessor bus, adapts it to an
-on-chip "bus" (multiplexers instead of tri-state), adds handshaking for devices
-with variable latency — combinational, registered, and pipelined — builds a
-memory-mapped IO device bridging a bus to a ready/valid stream, and surveys the
-standards (Wishbone, AXI).
+how. Standards such as [Wishbone](https://en.wikipedia.org/wiki/Wishbone_(computer_bus))
+or AXI exist to simplify that composition: a device built against a published
+interface works with any master that speaks the same one, so neither side has to
+be designed for the other. Interconnect is used **between chips** (external, e.g.
+a CPU talking to an external memory chip) or **within a chip**, where the
+resulting system is called a system-on-chip (SoC).
+
+This chapter starts from the classic microprocessor bus, adapts it to an on-chip
+"bus" (multiplexers instead of tri-state), adds handshaking for devices with
+variable latency — combinational, registered, and pipelined, then ready/valid
+and tagged out-of-order completion — builds a memory-mapped IO device bridging a
+bus to a ready/valid stream, and surveys the standards (Wishbone, AXI).
 
 *Conventions: every file path is relative to `tutorial/ch12-interconnect/`, and
 every command is run from that folder.*
 
 ### How the chapter fits together
 
-One question runs through all of it: **when is a transfer finished, and who is
-allowed to say so?** Everything else follows from the answer.
+One question runs through the whole chapter: **when is a transfer finished, and
+who says so?** Each section answers it differently.
 
-Section 12.1 builds the wiring — an address decoder and a read mux — and shows
-that wiring alone cannot answer the question, because nothing in it says when a
-device is done. Sections 12.2 to 12.4 give the three answers, in order of how
-much they decouple the two sides:
+**[12.1](#121-a-classic-microprocessor-bus) — the off-chip bus.** Nobody says
+so. The peripheral's datasheet states an **access time**; the processor waits
+that long and reads. No signal announces the end of a transfer, and no clock is
+needed to count it out.
 
-| | `ack` is… | master holds the request? | cost |
-|---|---|---|---|
-| [12.2 combinational](#122-the-combinational-handshake) | a wire off the request | yes | a path from master to slave and back, on the critical path |
-| [12.3 pipelined](#123-the-pipelined-handshake) | a flip-flop | no — one cycle | must track which command an ack belongs to |
-| [12.4 registered](#124-the-registered-handshake) | a flip-flop | yes | the bus stays busy for the whole transfer |
+**[12.2](#122-an-on-chip-bus) — the same bus, on chip.** Tri-state sharing is
+[not practical inside a chip](#why-tri-state-is-not-practical-inside-a-chip), so
+an address decoder and a read multiplexer replace it. Every access still takes
+exactly one clock cycle, fixed in advance, so there is still nothing to say.
 
-Each of those three builds **the same four counters** behind the same
-`ReqAckIO` port, so the handshake is the only thing that changes between them;
-[Section 12.5](#125-the-three-schemes-compared) measures what each one costs.
+**[12.3](#123-handshake-schemes) — handshaking.** Devices now take a *varying*
+number of cycles, so only the device knows when it is done, and it has to say
+so on a wire. Five ways to say it, each built as the same four counters so that
+the handshake is the only difference:
 
-The rest applies the result. [Section 12.6](#126-memory-mapped-devices) puts a
-device in an address map and bridges it to a `Decoupled` stream;
-[Section 12.7](#127-bus-and-interface-standards) shows Wishbone and AXI4-Lite
-choosing among the same three schemes, with the *same* four counters again so
-the comparison stays honest; and
-[Section 12.11](#1211-every-module-side-by-side) classifies every module in the
-chapter by the driver expression it actually uses.
+| Scheme | The rule | Costs |
+|---|---|---|
+| [combinational](#1231-the-combinational-handshake) | `ack` comes back in the request cycle | a long path master → decoder → slave → master, which limits the clock |
+| [pipelined](#1232-the-pipelined-handshake) | request lasts one cycle, `ack` arrives later | must remember which command an `ack` belongs to |
+| [registered](#1233-the-registered-handshake) | `ack` from a flip-flop, request held until it comes | the bus is busy for two cycles per transfer |
+| [ready/valid](#1235-readyvalid-the-two-sided-handshake) | both sides can stall: transfer only when `ready` *and* `valid` | one channel per direction, so a transaction needs several |
+| [tagged](#1236-tagged-completion-answering-out-of-order) | every command carries an id, every answer repeats it | a table of outstanding commands in the slave |
 
-If you only read one thing, read Section 12.5.
+[Section 12.3.4](#1234-the-three-schemes-compared) measures the first three
+against each other: pipelined manages 1 transfer per cycle, registered 1 per 2,
+and combinational 1 per cycle when the device answers at once but 1 per 3 once
+it needs two wait states. [Section
+12.3.7](#1237-handshakes-this-chapter-does-not-build) names the schemes this
+chapter does *not* build.
+
+**[12.4](#124-memory-mapped-devices) — devices in an address map.** A UART-like
+device gets an address range, and `MemMappedRV` bridges the bus to a
+ready/valid stream, with a status register software can poll.
+
+**[12.5](#125-bus-and-interface-standards) — the real standards.** Wishbone and
+AXI4-Lite turn out to be the schemes above under other names. The same four
+counters are built four more times — three Wishbone slaves and `AxiLiteCounter`
+— so the only thing that differs is the protocol.
+
+**[Recap](#127-recap).** One table lists every module in the chapter next to the
+actual line of Chisel that drives its `ack` or `ready`, its scheme, and its
+measured throughput.
+
+If you only read one thing, read [Section 12.3.4](#1234-the-three-schemes-compared).
 
 ---
 
-## 12.1 From a classic bus to an on-chip bus
+## 12.1 A classic microprocessor bus
 
-Interconnect standards such as [Wishbone](https://en.wikipedia.org/wiki/Wishbone_(computer_bus))
-or AXI exist to simplify composing components into larger systems. Interconnect
-is used **between chips** (external, e.g. a CPU talking to an external memory
-chip) or **within a chip**, where the resulting system is called a
-system-on-chip (SoC).
-
-A classic microcomputer connects the CPU to memory and I/O over shared address,
-data, and control buses, using **tri-state** drivers on the bidirectional data
-bus and an **address decoder** driving chip-select (CS) lines. This kind of bus
-interconnection was common with early microprocessors such as the
-[Z80](https://en.wikipedia.org/wiki/Zilog_Z80) or the
-[6502](https://en.wikipedia.org/wiki/MOS_Technology_6502).
+Figure 12.1 shows a classic microcomputer: a CPU connected over one shared
+[system bus](https://en.wikipedia.org/wiki/System_bus) to memory and I/O
+devices, as was common with early microprocessors such as the
+[Z80](https://en.wikipedia.org/wiki/Zilog_Z80) and the
+[6502](https://en.wikipedia.org/wiki/MOS_Technology_6502). Nothing is built here:
+the shared off-chip bus is obsolete, and it is worth two minutes only because
+every on-chip interconnect in this chapter is a variation on it.
 
 <p align="center">
   <img src="figures/bus.png" alt="A classic computer bus" width="480">
@@ -63,33 +85,70 @@ interconnection was common with early microprocessors such as the
 
 ***Figure 12.1** — A CPU, memory, and I/O on shared address/data/control buses.*
 
-The CPU is the bus master and drives the address and control lines (e.g. *read*
-and *write*); not all address lines reach every peripheral, so the upper
-address bits feed a decoder whose outputs drive each device's chip-select
-input. On a read, the selected device drives the data bus after its access
-time; on a write, the CPU drives the data bus and the peripheral latches it
-(often on a rising clock edge). Because the data bus is shared and
-bidirectional, every device's output needs a
+The bus splits into an **address** bus, a **data** bus, and **control** signals
+such as *read* and *write*. The CPU drives the address and control lines and is
+the only master, so it issues every command and nothing needs arbitration (a
+second master would; [Chapter 5
+§5.4](../ch05-combinational-building-blocks/README.md#54-arbiter) builds the
+arbiters). Both commands carry an address, which selects either a word of memory
+or a **register in an I/O device** — the wiring does not distinguish the two,
+which is what memory-mapped I/O means
+([Section 12.4](#124-memory-mapped-devices)). Not all address lines reach every
+peripheral: the upper bits feed a decoder whose outputs drive the devices'
+chip-select (CS) inputs.
+
+On a read, the selected device drives the data bus after its **access time**. On
+a write, the CPU drives the data bus and the peripheral accepts the data, often
+on the rising edge of the write strobe. Because that bus is bidirectional and
+shared by every device, each output needs a
 [tri-state](https://en.wikipedia.org/wiki/Three-state_logic) driver: in the
-tri-state (high-impedance) configuration **both output transistors are
-disabled**, and the pin is practically disconnected from the logic — so
-several devices can share the same wire without contention.
+tri-state configuration both output transistors are disabled and the pin is
+practically disconnected from the logic.
 
-Note that in its simplest form **this bus has no clock at all**: timing is
-defined purely by the read/write access times of the peripheral devices.
+Note that in its simplest form **the bus has no clock at all** — timing is
+defined purely by the read and write access times of the peripherals, which
+means the CPU's cycle has to suit the slowest device on the bus.
+[Section 12.3](#123-handshake-schemes) is where that assumption is replaced by a
+signal.
 
-Modern computers use dedicated buses per purpose instead of one shared bus —
-e.g. a dedicated memory bus for external memory, and serial, point-to-point I/O
-buses such as [PCI Express](https://en.wikipedia.org/wiki/PCI_Express) for
-peripherals. Nevertheless, the classic bus concept — an address bus, a data
-bus, and chip-select signals — remains the mainstream mental model for core
-interconnection, and we adapt it for on-chip use next.
+Modern computers use a dedicated bus per purpose — a memory bus for external
+memory, and serial, point-to-point I/O buses such as
+[PCI Express](https://en.wikipedia.org/wiki/PCI_Express) for peripherals. Even
+so, the classic picture of an address bus, a data bus, and chip selects is still
+the mainstream mindset for core interconnection, and it is what we adapt for
+on-chip use next.
 
-On-chip, tri-state buses are impractical, so we **split** the data bus into
-separate write-out and read-in wires and use a **multiplexer** (selected by the
-address decoder) for the read path. On-chip wires are cheap compared to PCB
-traces or connectors, so this duplication costs little. Connections are
-clocked.
+---
+
+## 12.2 An on-chip bus
+
+The concept translates to the inside of a chip, with two changes: the
+**tri-state data bus goes away**, and the connections are **clocked**.
+
+### Why tri-state is not practical inside a chip
+
+On a board tri-state buys scarce pins and traces, and a board can police it.
+Inside a chip the wires it saves are nearly free, and the risk is not worth it:
+if two output enables are ever on at once — a decoder bug, a glitch while the
+selection switches — the wire becomes a direct path from supply to ground, and
+on silicon that is a respin rather than a rework. Internal tri-state buffers are
+scarce in standard-cell flows and absent from modern FPGA fabrics in any case,
+where synthesis rewrites such a net into the multiplexer below — so you get the
+mux either way, just further from the source.
+
+Tri-state does survive at the **chip boundary**, where an external bus still
+needs bidirectional pins, and that is the one place Chisel offers it: an
+`Analog(w.W)` port, `attach`ed to another `Analog` or to a `BlackBox` pad cell.
+`Analog` extends `Element` rather than `Bits`, so it carries no operators at
+all — a tri-state *internal* bus is not merely discouraged in Chisel, it is
+inexpressible (see [§L](../SYSTEMVERILOG-NOTES.md#l-things-chisel-will-not-generate)).
+
+### The read multiplexer
+
+So we **split** the data bus into two sets of wires, one for writing and one for
+reading, and select the read path with a **multiplexer** driven by the address
+decoder. On-chip wires are cheap compared with PCB traces and connectors, so the
+duplication costs little.
 
 <p align="center">
   <img src="figures/bus-on-chip.png" alt="The on-chip bus" width="520">
@@ -99,7 +158,7 @@ clocked.
 decoder drives both the chip selects and the mux.*
 
 Figure 12.2 is small enough to build outright, and worth building because it is
-the only part of the on-chip bus that involves no protocol at all — just wiring:
+the only part of the on-chip bus with no protocol in it at all — just wiring:
 
 `src/main/scala/soc/BusDecoder.scala`
 ```scala
@@ -117,21 +176,131 @@ class BusDecoder(val devices: Int = 4, val addrWidth: Int = 8,
 }
 ```
 
-Those three lines are the whole of Figure 12.2. `index` is the address decode;
-the `for` loop fans it out into one-hot chip selects; and `io.deviceRdData(index)`
-is the read multiplexer that replaces the tri-state data bus — a `Vec` indexed
-by hardware, which Chisel elaborates into the mux the figure draws.
+Those three lines are the whole of Figure 12.2: `index` is the address decode,
+the `for` loop fans it out into one-hot chip selects, and
+`io.deviceRdData(index)` is the read multiplexer that replaces the tri-state
+data bus — a `Vec` indexed by hardware, which Chisel elaborates into the mux the
+figure draws. There are no registers, which is the point: this is
+who-is-selected and whose-data-comes-back, not when-a-transfer-completes.
 
-The address split is worth pausing on. With 16 bytes per device, the low four
-bits of the address pick a register *inside* a device and never reach the
-decoder, so `0x00` and `0x0c` both select device 0 while `0x10` selects
-device 1. That is the same "not all address lines reach every peripheral"
-arrangement as the off-chip bus, done with bit slicing instead of wiring.
+Note that `addrWidth` is the width of the *whole* bus address, not of the device
+selector. With the default parameters — `devices = 4`, `deviceBytes = 16`,
+`addrWidth = 8` — `index` is `io.address(5, 4)`, so the eight bits split three
+ways:
 
-There are no registers here, which is the point: this is who-is-selected and
-whose-data-comes-back, not when-a-transfer-completes. `BusDecoderTest` checks it
-without ever stepping the clock, including that exactly one chip select is ever
-active across the whole address range.
+| Bits | Role | Read by |
+|---|---|---|
+| `[3:0]` | offset inside a device: 16 bytes, four 32-bit registers | the selected device |
+| `[5:4]` | `index` — which of the four devices | the decoder and the read mux |
+| `[7:6]` | headroom — unused at four devices | the decoder, once `devices` grows |
+
+The two top bits are spare rather than wasted: `sel` widens with the device
+count, so `devices = 8` makes `index` `io.address(6, 4)` and `devices = 16`
+makes it `io.address(7, 4)`, decoding the whole address. Six bits (`lo + sel`)
+is the narrowest address the `require` accepts at four devices.
+
+With four devices, then, the decoder inspects two bits and ignores two. `0x00`
+and `0x0c` both select device 0 and `0x10` selects device 1, while `0x40`
+aliases onto `0x00` because bits 7 and 6 are never examined — the same "not all
+address lines reach every peripheral" arrangement as off-chip, done with bit
+slicing instead of wiring. Widen `devices` to 16 and the aliasing disappears,
+since every bit is then decoded.
+
+Splitting the data bus makes the two directions asymmetric, which is why both
+`cs` and the mux exist:
+
+- **Writing is a broadcast.** Address and write data reach every device, and the
+  chip select is what stops all but one from latching — the same job it did
+  off-chip, and the reason `BusDecoder` needs no write port.
+- **Reading is a selection.** Every device drives its own `rdData` wires
+  continuously and the mux picks one. Nothing is ever switched off.
+
+The cost of the trade is that the read path grows with the system: a tri-state
+bus grows by one more tap on the same wire, while `deviceRdData` grows by another
+32 wires and another mux input, so area and mux delay both rise with the device
+count. For a handful of peripherals that is the right trade; past that, systems
+stop widening one flat bus and go hierarchical — segments joined by bridges, a
+crossbar, or a network-on-chip, such as the OCP-based one mentioned in
+[Section 12.5](#open-core-protocol).
+
+### Checking the wiring
+
+`BusDecoder` has no registers, so the test needs no clock: `poke` an address,
+`expect` the outputs, and read the answer in the same instant. The first case
+walks a handful of byte addresses and checks the one-hot chip selects, the
+address split above included: `0x0c` still selects device 0, and `0x35` selects
+device 3.
+
+`src/test/scala/BusDecoderTest.scala`
+```scala
+  "A bus decoder" should "select one device per 16-byte window" in {
+    test(new BusDecoder(devices = 4)) { dut =>
+      // Byte address -> which device. The low four bits address *within* a
+      // device, so 0x00 and 0x0c both land on device 0.
+      for ((addr, device) <- Seq(0x00 -> 0, 0x0c -> 0, 0x10 -> 1,
+                                 0x20 -> 2, 0x35 -> 3)) {
+        dut.io.address.poke(addr.U)
+        for (i <- 0 until 4) {
+          dut.io.cs(i).expect((i == device).B,
+            f"address 0x$addr%02x should select device $device, not $i")
+        }
+      }
+    }
+  }
+```
+
+The second case is the property that matters for a bus that used to be
+tri-state: sweep every address in the map and count how many chip selects are
+active. Anything but exactly one would be two devices answering at once. The
+third gives each device a distinguishable read value and checks the mux hands
+back the selected one:
+
+```scala
+  it should "never select two devices at once" in {
+    test(new BusDecoder(devices = 4)) { dut =>
+      for (addr <- 0 until 64) {
+        dut.io.address.poke(addr.U)
+        val hot = (0 until 4).count(i => dut.io.cs(i).peekBoolean())
+        assert(hot == 1, f"address 0x$addr%02x drove $hot chip selects, expected 1")
+      }
+    }
+  }
+
+  it should "route the selected device's data back through the read mux" in {
+    test(new BusDecoder(devices = 4)) { dut =>
+      // Give each device a distinguishable value, then check the mux picks it.
+      for (i <- 0 until 4) {
+        dut.io.deviceRdData(i).poke((0xd0 + i).U)
+      }
+      for ((addr, device) <- Seq(0x00 -> 0, 0x10 -> 1, 0x20 -> 2, 0x30 -> 3)) {
+        dut.io.address.poke(addr.U)
+        dut.io.rdData.expect((0xd0 + device).U,
+          f"address 0x$addr%02x should read device $device")
+      }
+    }
+  }
+```
+
+Run just this suite:
+
+```
+sbt "testOnly BusDecoderTest"
+```
+
+```
+[info] BusDecoderTest:
+[info] A bus decoder
+[info] - should select one device per 16-byte window
+[info] - should never select two devices at once
+[info] - should route the selected device's data back through the read mux
+[info] Run completed in 1 second, 15 milliseconds.
+[info] Total number of tests run: 3
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 3, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+[Section 12.6](#126-build-run-and-check) runs the chapter's whole suite.
 
 With this simple setup we assume every read or write completes in a single
 clock cycle — realistic only for very small systems. A first, natural
@@ -147,10 +316,42 @@ acknowledgment.
 
 ---
 
-## 12.2 The combinational handshake
+## 12.3 Handshake schemes
 
-Every device in the next three sections speaks the same port, so that the
-handshake is the only thing that changes between them:
+Up to here the master knew the timing. With a fixed single-cycle bus — or the
+fixed one-cycle-later variant — "the transfer is finished" is something the
+master can *count* rather than observe, and no signal has to say it. A device
+with variable latency breaks that arrangement, because the only party that knows
+when the data is good is the device. So the timing contract moves onto a wire:
+the master **requests** by asserting `rd` or `wr`, and the slave
+**acknowledges** with `ack` when the transfer is complete. A device that needs
+longer simply keeps `ack` low, and the cycles it inserts that way are called
+**wait states**.
+
+That much the whole **request/acknowledge family** shares. What its members
+disagree about is a single question — **when may `ack` rise?** — and the
+disagreement is generated by two independent decisions:
+
+- **Where does `ack` come from?** A wire off the request can answer inside the
+  request cycle, but it strings the master, the address decoding, the slave, and
+  the master's `ack` input onto one combinational path. Out of a flip-flop that
+  path is gone, but the answer can then never arrive before the next clock edge.
+- **How long does the master drive the request?** Holding it until `ack` keeps
+  the bus occupied for the whole transfer. Releasing it after one cycle frees the
+  bus immediately — but then `ack` refers to a command that is no longer on the
+  wires, and the two sides have to agree on which one it was.
+
+Three of the four combinations are worth building, in order of how much they
+decouple the two sides ([Section 12.3.4](#1234-the-three-schemes-compared)
+explains why the fourth is not):
+
+| | `ack` is… | master holds the request? | cost |
+|---|---|---|---|
+| [12.3.1 combinational](#1231-the-combinational-handshake) | a wire off the request | yes | a path from master to slave and back, on the critical path |
+| [12.3.2 pipelined](#1232-the-pipelined-handshake) | a flip-flop | no — one cycle | must track which command an ack belongs to |
+| [12.3.3 registered](#1233-the-registered-handshake) | a flip-flop | yes | the bus stays busy for the whole transfer |
+
+All three build their device behind one and the same port:
 
 `src/main/scala/soc/ReqAckIO.scala`
 ```scala
@@ -169,7 +370,38 @@ Seven wires: an address, a read and a write strobe, the two data directions, a
 byte mask, and an acknowledgment. Nothing in them fixes *when* `ack` may rise —
 that is the handshake, and it is a property of the device rather than of the
 port. What changes between the three schemes is the slave's logic, not this
-declaration.
+declaration. Nothing in the types enforces a scheme either: a slave that
+acknowledges too early, or a master that lets go of its request too soon, is a
+type-correct Chisel design and a broken bus.
+
+The device behind that port is **the same four counters** every time, so that
+nothing but the handshake varies: four 32-bit counters at word addresses `0x0`,
+`0x4`, `0x8` and `0xc`, each incrementing on every clock cycle, and each
+writable — a write loads a new value into one counter. Free-running counters are
+what make the timing visible in the *data* and not only in the waveform: because
+the value moves every cycle, the number a read returns depends on exactly which
+cycle the device sampled it, so a scheme that answers one cycle later answers
+with a different number.
+
+The three subsections come in the order the schemes are usually met: the
+same-cycle handshake first, then the pipelined one that removes its combinational
+path, and last the registered one that sits between them — the halfway house a
+first design tends to reach for. [Section 12.3.4](#1234-the-three-schemes-compared)
+then measures what each one actually costs.
+
+Those three exhaust the req/ack family, not handshaking. Two further schemes are
+built elsewhere in this chapter and get a subsection of their own here, because
+they answer questions `ack` cannot:
+[Section 12.3.5](#1235-readyvalid-the-two-sided-handshake) is **ready/valid**,
+where the *receiver* can stall too (`MemMappedRV`, `RegFifo`, and every AXI
+channel), and [Section 12.3.6](#1236-tagged-completion-answering-out-of-order)
+is **tagged completion**, where a response names the transaction it belongs to
+and may therefore overtake another (`Axi4OooReadMemory`).
+[Section 12.3.7](#1237-handshakes-this-chapter-does-not-build) then names the
+families that are real but unbuilt here, so the boundary of the chapter is
+explicit rather than implied.
+
+### 12.3.1 The combinational handshake
 
 The simplest handshake reacts within the request cycle: the processor drives
 the address bus (`address`) and the read signal (`rd`) in cycle 2, and `ack`
@@ -198,7 +430,7 @@ in cycle 2. The price is that the handshake, including address decoding, is a
 combinational circuit through the peripheral, which can hurt the maximum clock
 frequency. The classic Wishbone protocol uses exactly this same-cycle
 acknowledgment (Wishbone later added a pipelined mode too), and
-`WishboneCounterWait` in [Section 12.7](#wishbone) is a working device with
+`WishboneCounterWait` in [Section 12.5](#wishbone) is a working device with
 exactly the timing drawn above.
 
 Built against this chapter's own port, the scheme is almost entirely wire:
@@ -240,9 +472,7 @@ specification where `ack` (or busy/ready) need not be valid in the request
 cycle, enabling pipelined transactions and avoiding the combinational path
 between processor, address decoding, and device.
 
----
-
-## 12.3 The pipelined handshake
+### 12.3.2 The pipelined handshake
 
 A pipelined handshake avoids the single-cycle combinational loop: a read or
 write command is signaled by asserting `rd` or `wr` for a single clock cycle
@@ -358,9 +588,7 @@ two are meant to be read side by side; [Chapter 13
 §13.2–13.2.1](../ch13-debugging-testing-verification/README.md#132-testing-in-chisel)
 uses exactly this pair to make the case for wrapping a protocol in functions.
 
----
-
-## 12.4 The registered handshake
+### 12.3.3 The registered handshake
 
 Between the two schemes above sits a third, and it is the one a first design
 usually reaches for: keep the master holding its request, as the
@@ -423,7 +651,7 @@ appears on the write, so a held request cannot store its data twice:
 ```
 
 In the generated code the acknowledgment is a flip-flop read out through an
-`assign`, where the combinational device of Section 12.2 had a bare wire:
+`assign`, where the combinational device of Section 12.3.1 had a bare wire:
 
 ```systemverilog
       ackReg <= active & ~ackReg;
@@ -449,33 +677,28 @@ is never idle for want of work, it still answers only every other cycle:
 ```
 
 This is not a strawman: it is what a **synchronous Wishbone slave** does, and
-[Section 12.7](#wishbone) builds exactly this device again against the Wishbone
+[Section 12.5](#wishbone) builds exactly this device again against the Wishbone
 signal set, where Figure 12.7 shows its timing. Half the fix, in other words, is
 what a real and widely used protocol settles for.
 
----
+### 12.3.4 The three schemes compared
 
-## 12.5 The three schemes compared
-
-The three sections above each built the same four counters behind the same
+The three subsections above each built the same four counters behind the same
 `ReqAckIO` port, changing only the handshake. This section puts them next to one
 another, because the registered and pipelined schemes are easy to conflate —
 both put a flip-flop in front of `ack` — and the difference between them matters
 more than the similarity.
 
-Two independent questions decide the scheme:
-
-1. **Is `ack` a wire off the request, or does it come out of a flip-flop?**
-   This decides whether there is a combinational path running from the master,
-   through address decoding and the slave, and back into the master — the path
-   that limits the clock frequency.
-2. **Does the master hold the request until it sees `ack`, or release it after
-   one cycle?** This decides whether a second transaction can start before the
-   first has finished.
+The two decisions the section opened with are the table's "`ack` comes from" and
+"Master holds the request until `ack`?" rows. The first decides whether a
+combinational path runs from the master, through address decoding and the slave,
+and back into the master — the path that limits the clock frequency; the second
+decides whether a second transaction can start before the first has finished.
+Every other row is a consequence of those two:
 
 | | Combinational | Registered | Pipelined |
 |---|---|---|---|
-| Built here as | `CounterDeviceComb` (§12.2) | `CounterDeviceReg` (§12.4) | `CounterDevice` (§12.3) |
+| Built here as | `CounterDeviceComb` (§12.3.1) | `CounterDeviceReg` (§12.3.3) | `CounterDevice` (§12.3.2) |
 | `ack` comes from | a wire off the request | a flip-flop | a flip-flop |
 | Can `ack` land in the request cycle? | yes | no | no |
 | Master holds the request until `ack`? | yes | yes | **no — one cycle** |
@@ -498,8 +721,9 @@ transfer per cycle possible in Figure 12.4, and it is the only one of the three
 that gets there. The price is bookkeeping: since `ack` no longer arrives while
 the request that caused it is still being driven, it refers to *a command
 issued some cycles ago*, and master and slave must agree on the order — which
-is exactly why `ReqAckToWishbone` in Section 12.7 needs a state machine, and
-why AXI eventually needs transaction ids.
+is exactly why `ReqAckToWishbone` in Section 12.5 needs a state machine, and
+why AXI eventually needs the transaction ids of
+[Section 12.3.6](#1236-tagged-completion-answering-out-of-order).
 
 The fourth combination — a combinational `ack` with a single-cycle command — is
 degenerate rather than useful. If the master releases the request after one
@@ -528,12 +752,186 @@ above are numbers the build checks rather than claims:
   }
 ```
 
+### 12.3.5 Ready/valid: the two-sided handshake
+
+Every scheme so far shares an asymmetry: the master decides when a transfer
+starts, and the slave only decides when it ends. Nothing lets the slave say *not
+yet, do not even start* — `ReqAckIO` has no wire for it, so a slave that cannot
+take a command must take it anyway and withhold `ack`. The **ready/valid**
+handshake of [Chapter 9](../ch09-communicating-state-machines/README.md#93-the-readyvalid-interface)
+removes the asymmetry: the producer raises `valid` when it has data, the
+consumer raises `ready` when it can accept data, and a transfer happens in
+exactly those cycles where both are high — what `Decoupled` calls `fire`.
+
+This is not a fourth row of the table above, because it answers a different
+question. Req/ack is a **transaction** handshake: one request, one response, the
+response bound to the request that caused it. Ready/valid is **flow control on
+one unidirectional channel**, with no notion of a response at all — so the two
+compose rather than compete, and a request/response protocol built on
+ready/valid needs one channel per direction plus a rule for pairing them up.
+Three properties follow, and all three matter later in the chapter:
+
+- **Backpressure is symmetric.** Either side can stall the other by holding its
+  flag low, so a slow consumer needs no separate "wait" signal.
+- **`valid` must not depend combinationally on `ready`** (or the reverse) — two
+  modules each waiting for the other's flag deadlock, and Chisel will not catch
+  it for you.
+- **A raised `valid` should not be withdrawn** before it is consumed. Chisel
+  spells the stronger promise `IrrevocableIO`, and AXI requires it: once
+  asserted, `VALID` stays asserted until the transfer completes.
+
+Two of this chapter's own modules speak it directly. `RegFifo` (borrowed from
+[Chapter 11](../ch11-example-designs/README.md)) is pure ready/valid on both
+sides:
+
+`src/main/scala/fifo/fifo.scala`
+```scala
+  io.enq.ready := !fullReg
+  io.deq.valid := !emptyReg
+```
+
+And `MemMappedRV` ([Section 12.4](#124-memory-mapped-devices)) is the place the
+two disciplines actually meet — pipelined req/ack facing the bus, ready/valid
+facing the device:
+
+`src/main/scala/soc/MemMappedRV.scala`
+```scala
+  statusReg := io.rx.valid ## io.tx.ready
+
+  ackReg := io.mem.rd || io.mem.wr
+  io.mem.ack := ackReg
+```
+
+Note what the bridge does *not* do: it never consults `io.tx.ready` before
+acknowledging a write, so it does not translate backpressure into wait states —
+it **exposes** it, as the two status bits software is expected to poll. That is
+the whole reason [Section 12.4](#124-memory-mapped-devices) needs the TDRE/RDRF
+status register, and the reason the no-deassert rule above is a correctness
+requirement there rather than a style note: software that polls "ready", then
+acts, must still find the condition true.
+
+The third place ready/valid appears is the one that matters most in practice.
+AXI applies it to **five independent channels**, so a transaction is no longer a
+handshake at all — it is reassembled from five separate transfers, which is why
+an AXI slave needs a state machine where a `ReqAckIO` slave needs none, and why
+`AxiLiteCounter` must accept AW and W in either order
+([Section 12.5](#axi)).
+
+### 12.3.6 Tagged completion: answering out of order
+
+The pipelined scheme of [Section 12.3.2](#1232-the-pipelined-handshake) lets many
+commands be in flight, and pays with the bookkeeping named in
+[Section 12.3.4](#1234-the-three-schemes-compared): master and slave must agree
+on the order. That agreement is itself a cost. If responses must come back in
+the order the commands went out, one slow command holds up every command behind
+it however ready they are — **head-of-line blocking** — and the slave cannot use
+the freedom the pipelining bought it.
+
+The fix is to stop inferring which command a response belongs to and put the
+answer on the wires: every command carries an **id**, every response carries the
+id it belongs to, and the slave may then answer in whatever order it finishes.
+This is the last question in the family — after *when may `ack` rise?* and *who
+may stall whom?* comes **which transaction is this answer for?**
+
+That is what AXI4's tag is for. `Axi4Addr`, `Axi4RdData`, and `Axi4WrResp` all
+carry an `id`, and `Axi4OooReadMemory` — built and tested in
+[the AXI4 appendix](APPENDIX-AXI4.md) — is a slave that uses it: a table of
+`slots` accepted commands, each with an artificial `id * 4`-cycle delay standing
+in for a bank conflict or a cache miss, and a picker that serves whichever one
+finishes first:
+
+`src/main/scala/axi4/Axi4.scala`
+```scala
+  // --- pick the next burst to serve ---------------------------------------
+  val ready = VecInit((0 until slots).map(i => busyRegs(i) && delayRegs(i) === 0.U))
+  when(!servingReg && ready.reduce(_ || _)) {
+    servingReg := true.B
+    slotReg := PriorityEncoder(ready)
+  }
+```
+
+`src/test/scala/Axi4MemoryTest.scala` issues the slow command first and expects
+the fast one back first, which is exactly the behaviour the ids exist to make
+safe:
+
+```scala
+      sendAddr(dut.io.ar, dut.clock, id = 1, addr = 0, len = 0, burst = Axi4Burst.incr)
+      sendAddr(dut.io.ar, dut.clock, id = 0, addr = 4, len = 0, burst = Axi4Burst.incr)
+
+      dut.io.r.ready.poke(true.B)
+
+      while (!dut.io.r.valid.peekBoolean()) dut.clock.step()
+      dut.io.r.bits.id.expect(0.U, "the fast request comes back first")
+```
+
+Three boundaries are worth being precise about:
+
+- **Reordering is between transactions, not inside one.** AXI4 requires the
+  beats of a burst to be contiguous — read data of different ids may not be
+  interleaved (AXI3 allowed it and AXI4 dropped it) — so once
+  `Axi4OooReadMemory` starts a burst it runs to its `last` beat before another
+  id is served.
+- **A tag says *which*, not *whether*.** Success is a separate field: the `resp`
+  code on the B and R channels, `AxiResp.okay` / `exOkay` / `slvErr` / `decErr`
+  in `src/main/scala/axi/AxiResp.scala`. Every slave in this chapter answers
+  `okay`; a real one reports `decErr` for an address no slave claims.
+- **Whether a write is answered at all is its own dimension.** AXI's B channel
+  makes writes *non-posted* — the master gets a response — as does `wr`/`ack`
+  here. A **posted** write gets none: PCIe posts memory writes and recovers
+  ordering with explicit fences, trading the round trip for the loss of "the
+  write has landed" as an observable event.
+
+### 12.3.7 Handshakes this chapter does not build
+
+The five schemes above are the ones this chapter has hardware for. They are not
+the whole design space, and the families below are worth recognising by name
+even though nothing here implements them — no code in this repository backs this
+subsection, and the links are the reference.
+
+- **Credit-based flow control.** Instead of a per-transfer stall signal, the
+  receiver grants the sender a number of **credits** — free buffer slots. The
+  sender spends one per beat and stops at zero; the receiver returns credits as
+  it drains. The round trip leaves the stall path entirely, which is what makes
+  it the scheme of choice when the link is long relative to the clock: PCIe,
+  CXL, and InfiniBand all use it, as do virtual-channel routers in a
+  network-on-chip. See Dally and Towles, *Principles and Practices of
+  Interconnection Networks*, and the flow-control chapter of the
+  [PCIe base specification](https://pcisig.com/specifications).
+- **Asynchronous (clockless) handshakes.** This is where the word *handshake*
+  comes from. With no clock, request and acknowledge are the only timing: a
+  **4-phase** (return-to-zero) protocol takes both signals back down between
+  transfers, a **2-phase** (transition-signalling) protocol treats every edge as
+  an event and halves the transitions at the cost of harder logic. The data can
+  be *bundled* (ordinary wires plus a matched delay) or *dual-rail* / 1-of-N,
+  which encodes validity into the data and is delay-insensitive. Built out of
+  Muller C-elements; see Sutherland's
+  [Micropipelines](https://dl.acm.org/doi/10.1145/63526.63532) (CACM 1989) and
+  Sparsø and Furber, *Principles of Asynchronous Circuit Design*.
+- **Crossing clock domains.** Structurally the registered handshake of
+  [Section 12.3.3](#1233-the-registered-handshake), except each side sees the
+  other's signal through a two-flop synchronizer, so the full 4-phase sequence
+  is mandatory: a pulse that is one cycle wide in the sending domain can be
+  missed entirely in the receiving one. Bulk data usually skips the per-transfer
+  handshake for an asynchronous FIFO with Gray-coded pointers (rocket-chip's
+  `AsyncQueue`). See Cummings, *Clock Domain Crossing (CDC) Design &
+  Verification Techniques Using SystemVerilog* (SNUG Boston 2008), in the
+  [former Sunburst Design paper archive](https://www.paradigm-works.com/technical-library).
+- **Retry, abort, and split responses.** Every scheme here assumes a slave that
+  will eventually answer. A slave that cannot — a busy DRAM controller, a bridge
+  whose far side is occupied — may instead be allowed to *refuse* and have the
+  master reissue: AHB's `HRESP` has RETRY and SPLIT alongside ERROR, Wishbone
+  adds `RTY_O` and `ERR_O` next to `ACK_O` (the bundle in
+  `src/main/scala/wishbone/Wishbone.scala` implements only `ACK_O`), and PCI let
+  a target disconnect mid-burst. The cost is that a transaction is no longer
+  guaranteed to make progress, so the master needs a retry policy and the system
+  needs an argument about why it terminates.
+
 ---
 
-## 12.6 Memory-mapped devices
+## 12.4 Memory-mapped devices
 
 The devices here use the **pipelined** handshake of
-[Section 12.3](#123-the-pipelined-handshake): `MemMappedRV` drives
+[Section 12.3.2](#1232-the-pipelined-handshake): `MemMappedRV` drives
 `ackReg := io.mem.rd || io.mem.wr`, so a single-cycle command is answered one
 cycle later and the master never holds the bus. That is the minimum latency the
 scheme allows, and the same shape as `CounterDevice`.
@@ -590,9 +988,10 @@ condition gone. If a device cannot guarantee that, insert a one-word buffer
 (register) on each of the two ready/valid channels between the memory-mapped
 interface and the device to restore the guarantee.
 
-The memory-mapped device needs no new port: it reuses the `ReqAckIO` of
-[Section 12.2](#122-the-combinational-handshake) at four address bits, so the
-whole chapter runs on one bus definition. Only `wrMask` goes unused here —
+The memory-mapped device needs no new port: it reuses the `ReqAckIO` declared in
+[Section 12.3](#123-handshake-schemes) at four address bits — with the pipelined
+handshake of [Section 12.3.2](#1232-the-pipelined-handshake) behind it, as above
+— so the whole chapter runs on one bus definition. Only `wrMask` goes unused here —
 this device moves whole words between the bus and a byte stream, so there is no
 sub-word write to mask.
 
@@ -651,14 +1050,16 @@ memory-mapped device does not care which implementation sits behind it.
 
 ---
 
-## 12.7 Bus and interface standards
+## 12.5 Bus and interface standards
 
 Several point-to-point and bus standards have been proposed over the years;
 the ready/valid discipline from [Chapter 9](../ch09-communicating-state-machines/README.md)
 underlies most of them.
 
-Each standard below picks one of the three schemes from Sections 12.2 to 12.4,
-so it is worth naming them up front. Classic Wishbone is the **combinational**
+Each standard below picks one of the three schemes from Sections 12.3.1 to 12.3.3
+and layers the ready/valid and tagging of
+[Sections 12.3.5](#1235-readyvalid-the-two-sided-handshake)–[12.3.6](#1236-tagged-completion-answering-out-of-order)
+on top, so it is worth naming them up front. Classic Wishbone is the **combinational**
 handshake, and its synchronous variant is the **registered** one — the two
 Wishbone slaves built here are the same devices as `CounterDeviceComb` and
 `CounterDeviceReg`, wearing Wishbone's signal names. AXI is different in kind:
@@ -709,7 +1110,7 @@ cycles, the write in cycle 5 works the same way — `WE_O` high, write data on
 `DAT_O` — and is again acknowledged combinationally inside the cycle. This is a
 Wishbone slave responding asynchronously: one transfer per clock cycle, at the
 price of the combinational path described in
-[Section 12.2](#122-the-combinational-handshake).
+[Section 12.3.1](#1231-the-combinational-handshake).
 
 <p align="center">
   <img src="figures/wishbone-sync.png" alt="Wishbone synchronous read followed by a synchronous write" width="620">
@@ -750,9 +1151,9 @@ class WishboneIO(addrWidth: Int) extends Bundle {
 ```
 
 The device behind it is deliberately the *same* four free-running loadable
-counters as `CounterDevice` in [Section 12.3](#123-the-pipelined-handshake), so
+counters as `CounterDevice` in [Section 12.3.2](#1232-the-pipelined-handshake), so
 the protocol is the only thing that changes. The asynchronous slave of Figure
-12.5 is almost entirely combinational:
+12.6 is almost entirely combinational:
 
 `src/main/scala/wishbone/Wishbone.scala`
 ```scala
@@ -1180,7 +1581,7 @@ its data bus to zero; Xilinx has since moved all its interconnects to AXI.
 
 ---
 
-## 12.8 Build, run, and check
+## 12.6 Build, run, and check
 
 ```
 $ sbt test
@@ -1207,10 +1608,10 @@ emits twelve files into `generated/`:
 | File | What it is |
 |------|------------|
 | `BusDecoder.sv` | address decoder + read mux, no handshaking (Figure 12.2) |
-| `CounterDeviceComb.sv` | `ReqAckIO` device, combinational ack, 2 wait states (Section 12.2) |
-| `CounterDeviceReg.sv` | the four counters, registered ack (Section 12.4) |
-| `CounterDevice.sv` | the four counters, pipelined handshake (Section 12.3) |
-| `UseMemMappedRV.sv` | the memory-mapped ready/valid bridge (Section 12.6) |
+| `CounterDeviceComb.sv` | `ReqAckIO` device, combinational ack, 2 wait states (Section 12.3.1) |
+| `CounterDeviceReg.sv` | the four counters, registered ack (Section 12.3.3) |
+| `CounterDevice.sv` | the four counters, pipelined handshake (Section 12.3.2) |
+| `UseMemMappedRV.sv` | the memory-mapped ready/valid bridge (Section 12.4) |
 | `WishboneCounter.sv` | the same counters, asynchronous Wishbone slave (Figure 12.6) |
 | `WishboneCounterWait.sv` | the Wishbone equivalent of `CounterDeviceComb` (Figure 12.8) |
 | `WishboneCounterSync.sv` | the same counters, synchronous Wishbone slave (Figure 12.7) |
@@ -1226,7 +1627,7 @@ emitted separately.
 
 ---
 
-## 12.9 Recap
+## 12.7 Recap
 
 - A classic microprocessor bus (Z80/6502-style) shares one tri-state data bus,
   needs no clock, and defines timing purely through peripheral access times;
@@ -1239,6 +1640,17 @@ emitted separately.
   is half a fix. **Pipelined** = flop, released after one cycle: the only one
   that reaches back-to-back requests, at the cost of tracking which command an
   ack belongs to. Measured at 1 transfer per 3, per 2, and per cycle.
+- **Two further schemes**, both built elsewhere in the chapter and both
+  answering questions `ack` cannot. **Ready/valid** makes stalling symmetric —
+  the receiver can refuse a transfer, which req/ack has no wire for — and is
+  per-channel flow control rather than a transaction, so AXI needs five channels
+  and a state machine to rebuild one transaction from it. **Tagged completion**
+  puts an id on the command and the same id on the response, which removes the
+  in-order requirement the pipelined scheme imposes and with it head-of-line
+  blocking; `Axi4OooReadMemory` answers the later request first. Credit-based
+  flow control, clockless 2-/4-phase handshakes, clock-domain crossings, and
+  retry/split responses are named in
+  [Section 12.3.7](#1237-handshakes-this-chapter-does-not-build) but not built.
 - The pipelined scheme generalizes to point-to-point links through a switching
   fabric, with arbitration once there is more than one master; Patmos/OCP and
   `t-crest/soc-comm` use exactly this shape.
@@ -1251,42 +1663,16 @@ emitted separately.
 - **One device, seven implementations.** The same four counters appear behind
   every scheme and every protocol in the chapter, so the only variable is the
   interconnect: `CounterDeviceComb` / `CounterDeviceReg` / `CounterDevice` on
-  `ReqAckIO`, three Wishbone slaves, and `AxiLiteCounter`. Section 12.11 lists
+  `ReqAckIO`, three Wishbone slaves, and `AxiLiteCounter`. The table below lists
   them side by side, and `ReqAckToWishbone` measurably turns a 1-cycle pipelined
   read into a 2-cycle one.
 - **AXI4-Lite** is AXI with the bursts and ids removed: five `Decoupled`
   channels, and a write path that must accept AW and W in either order. Full
   AXI4 is in [the appendix](APPENDIX-AXI4.md).
 
----
+### Every module, side by side
 
-## 12.10 Exercise
-
-`BusDecoder` in Section 12.1 selects a device and routes its read data, but it
-knows nothing about handshaking. Put the two halves together: wire two
-`CounterDevice`s behind a `BusDecoder`, give each its own 16-byte window, and add
-the missing piece — combining the devices' `ack` signals so the master sees one
-acknowledgment from whichever device was selected. Then drive both from a test
-through the `read`/`write` helpers and check that each window reaches its own
-device.
-
-**Also:** Take `MemMappedRV` with a streaming device connected to its
-`rx`/`tx` ports and write a ChiselTest testbench for the memory interface.
-Explore what happens if the test ignores the status flags — i.e. it reads
-data while the receive channel is invalid, or writes while the transmit
-channel isn't ready. Then modify `MemMappedRV` so `ack` is delayed until the
-streaming device's `rx`/`tx` are actually ready/valid, and check whether your
-testbench still works with the delayed `ack`. If simulating both the
-streaming device and the memory interface starts to feel awkward in plain
-Scala — needing two software state machines running "in parallel" — that is
-exactly the problem multithreaded testing solves; see the
-[testing chapter](../ch13-debugging-testing-verification/README.md).
-
----
-
-## 12.11 Every module, side by side
-
-[Section 12.5](#125-the-three-schemes-compared) compares the three schemes on one
+[Section 12.3.4](#1234-the-three-schemes-compared) compares the three schemes on one
 port. This table widens that to every module in the chapter, protocol slaves
 included, each classified by its actual driver expression:
 
@@ -1329,6 +1715,30 @@ only place in the chapter where a ready/valid device beats the request/acknowled
 ones. And `Axi4OooReadMemory`'s two slots buy *ordering freedom, not rate*: it
 still measures 1 per 2 cycles, because `servingReg` leaves a dead cycle between
 bursts (see [the appendix](APPENDIX-AXI4.md#a6-what-these-models-leave-out)).
+
+---
+
+## 12.8 Exercise
+
+`BusDecoder` in Section 12.2 selects a device and routes its read data, but it
+knows nothing about handshaking. Put the two halves together: wire two
+`CounterDevice`s behind a `BusDecoder`, give each its own 16-byte window, and add
+the missing piece — combining the devices' `ack` signals so the master sees one
+acknowledgment from whichever device was selected. Then drive both from a test
+through the `read`/`write` helpers and check that each window reaches its own
+device.
+
+**Also:** Take `MemMappedRV` with a streaming device connected to its
+`rx`/`tx` ports and write a ChiselTest testbench for the memory interface.
+Explore what happens if the test ignores the status flags — i.e. it reads
+data while the receive channel is invalid, or writes while the transmit
+channel isn't ready. Then modify `MemMappedRV` so `ack` is delayed until the
+streaming device's `rx`/`tx` are actually ready/valid, and check whether your
+testbench still works with the delayed `ack`. If simulating both the
+streaming device and the memory interface starts to feel awkward in plain
+Scala — needing two software state machines running "in parallel" — that is
+exactly the problem multithreaded testing solves; see the
+[testing chapter](../ch13-debugging-testing-verification/README.md).
 
 ---
 

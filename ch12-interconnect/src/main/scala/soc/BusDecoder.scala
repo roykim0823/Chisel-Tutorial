@@ -10,12 +10,12 @@ import chisel3.util.log2Ceil
 //
 // There is deliberately no state here. This is the *wiring* of Figure 12.2 --
 // who is selected and whose data comes back -- not a protocol. Handshaking, and
-// therefore the question of when a transfer completes, arrives in Section 12.2.
+// therefore the question of when a transfer completes, arrives in Section 12.3.
 class BusDecoder(val devices: Int = 4, val addrWidth: Int = 8,
                  val deviceBytes: Int = 16) extends Module {
   require(devices >= 2, "a decoder needs at least two devices to choose between")
 
-  private val lo = log2Ceil(deviceBytes)
+  private val lo = log2Ceil(deviceBytes)  // log2Ceil rounds up to the next integer, so 16 bytes -> 4 bits
   private val sel = log2Ceil(devices)
   require(addrWidth >= lo + sel,
     s"$addrWidth address bits cannot select $devices devices of $deviceBytes bytes")
@@ -29,7 +29,7 @@ class BusDecoder(val devices: Int = 4, val addrWidth: Int = 8,
 
   // Each device owns `deviceBytes` of the address space, so the bits below that
   // window address *within* a device, and only the bits above it choose one.
-  private val index = io.address(lo + sel - 1, lo)
+  private val index = io.address(lo + sel - 1, lo)  // the upper bits of the address select the device
 
   for (i <- 0 until devices) {
     io.cs(i) := index === i.U

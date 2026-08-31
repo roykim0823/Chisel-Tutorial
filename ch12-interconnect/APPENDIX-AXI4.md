@@ -1,6 +1,6 @@
 # Appendix — Full AXI4
 
-[Section 12.7](README.md#axi) builds an **AXI4-Lite** slave: five ready/valid
+[Section 12.5](README.md#axi) builds an **AXI4-Lite** slave: five ready/valid
 channels, one data beat per address, one transaction at a time. Full **AXI4**
 keeps those five channels unchanged and adds three things on top of them —
 **bursts**, so one address handshake covers up to 256 data beats;
