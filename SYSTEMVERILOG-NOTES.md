@@ -932,9 +932,14 @@ difference is only in how much you have to read.
 ## L. Things Chisel will not generate
 
 - **No tri-state / high-impedance.** Chisel has no `Z` value, so an on-chip bus
-  is built from multiplexers instead of shared bidirectional wires. See
-  [Chapter 12](ch12-interconnect/README.md) — this is a deliberate restriction,
-  not an omission, because tri-state buses are impractical on-chip anyway.
+  is built from multiplexers instead of shared bidirectional wires. The one
+  concession is `chisel3.experimental.Analog`, for routing a bidirectional *pin*
+  through to a `BlackBox` pad cell: it extends `Element` rather than `Bits`, so it
+  has no operators and `attach` is all you can do with it — you can pass a
+  tri-state signal through a design, never compute with one. See
+  [Chapter 12 §12.2](ch12-interconnect/README.md#122-an-on-chip-bus) — this is a
+  deliberate restriction, not an omission, because tri-state buses are
+  impractical on-chip anyway.
 - **No `X` propagation in your description.** `X` appears only where firtool
   puts it, such as the `8'bx` on a disabled memory read in [§H](#h-memories).
 - **No inferred latches.** In Verilog, a combinational `always` block that does
