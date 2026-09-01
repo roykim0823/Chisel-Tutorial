@@ -66,4 +66,80 @@ class CounterDeviceTest extends AnyFlatSpec with ChiselScalatestTester {
       assert(read(3 * 4) > 1000, "counter loaded")
     }
   }
+
+  // --- one port, one device, three handshakes ------------------------------
+  // CounterDevice, CounterDeviceComb, and CounterDeviceReg all speak ReqAckIO
+  // and hold the same four counters, so the only thing the rates below can
+  // reflect is the handshake. Section 12.3.4 tabulates them.
+
+  "A pipelined slave" should "complete one transaction every cycle" in {
+    test(new CounterDevice()) { dut =>
+      // Issue a new read every cycle without ever waiting for an ack. This is
+      // what the single-cycle command buys: the master never has to hold the
+      // bus, so a second request can go out while the first is still in flight.
+      val n = 6
+      var acks = 0
+      for (i <- 0 until n) {
+        dut.io.address.poke(((i % 4) * 4).U)
+        dut.io.rd.poke(true.B)
+        dut.clock.step()
+        if (dut.io.ack.peekBoolean()) acks += 1
+      }
+      dut.io.rd.poke(false.B)
+      assert(acks == n, s"a pipelined slave sustains one ack per cycle, got $acks in $n")
+    }
+  }
+
+
+  private def reqAckRate(dut: ReqAckIO, clock: Clock, cycles: Int): Int = {
+    dut.address.poke(0.U)
+    dut.wrData.poke(0.U)
+    dut.wrMask.poke(15.U)
+    dut.wr.poke(false.B)
+    dut.rd.poke(true.B)                  // request held high throughout
+    var acks = 0
+    for (_ <- 0 until cycles) {
+      clock.step()
+      if (dut.ack.peekBoolean()) acks += 1
+    }
+    acks
+  }
+
+  "A combinational ReqAckIO device" should "answer inside the request cycle" in {
+    test(new CounterDeviceComb()) { dut =>
+      dut.io.address.poke(0.U)
+      dut.io.rd.poke(true.B)
+      // No clock step: with no wait states the ack is already there.
+      dut.io.ack.expect(true.B, "a combinational ack lands in the request cycle")
+
+      // And it is a wire, not a flop: withdrawing the request withdraws the ack
+      // in the same cycle.
+      dut.io.rd.poke(false.B)
+      dut.io.ack.expect(false.B, "ack tracks rd within the cycle")
+    }
+  }
+
+  it should "sustain one transfer per cycle with no wait states" in {
+    test(new CounterDeviceComb(0)) { dut =>
+      assert(reqAckRate(dut.io, dut.clock, 12) == 12,
+        "a zero-wait combinational device acks every cycle")
+    }
+  }
+
+  it should "drop to one per three cycles with two wait states" in {
+    test(new CounterDeviceComb(2)) { dut =>
+      assert(reqAckRate(dut.io, dut.clock, 12) == 4,
+        "two wait states means one transfer per three cycles")
+    }
+  }
+
+  "A registered ReqAckIO device" should "manage one transfer every two cycles" in {
+    test(new CounterDeviceReg()) { dut =>
+      // The request is held continuously and the device is never idle, yet it
+      // can only answer every other cycle -- the cost of keeping the request
+      // asserted through the ack cycle.
+      assert(reqAckRate(dut.io, dut.clock, 12) == 6,
+        "a registered device acks every other cycle")
+    }
+  }
 }

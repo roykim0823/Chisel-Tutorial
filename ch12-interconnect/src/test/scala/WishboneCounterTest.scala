@@ -8,7 +8,7 @@ import wishbone._
 // timing its figure shows.
 class WishboneCounterTest extends AnyFlatSpec with ChiselScalatestTester {
 
-  "An asynchronous Wishbone slave" should "acknowledge in the request cycle (Figure 12.5)" in {
+  "An asynchronous Wishbone slave" should "acknowledge in the request cycle (Figure 12.7)" in {
     test(new WishboneCounter()) { dut =>
       dut.io.sel.poke(15.U)
       dut.io.adr.poke(0.U)
@@ -26,7 +26,7 @@ class WishboneCounterTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  "A synchronous Wishbone slave" should "acknowledge one cycle later (Figure 12.6)" in {
+  "A synchronous Wishbone slave" should "acknowledge one cycle later (Figure 12.8)" in {
     test(new WishboneCounterSync()) { dut =>
       dut.io.sel.poke(15.U)
       dut.io.adr.poke(0.U)
@@ -46,7 +46,7 @@ class WishboneCounterTest extends AnyFlatSpec with ChiselScalatestTester {
 
   // The same master routine works against either slave because it waits for the
   // ack rather than assuming a fixed latency. `cycles` counts the clock steps
-  // spent waiting, which is what separates Figure 12.5 from Figure 12.6.
+  // spent waiting, which is what separates Figure 12.7 from Figure 12.8.
   private def read(dut: WishboneCounterSync, addr: Int): (BigInt, Int) = {
     dut.io.sel.poke(15.U)
     dut.io.adr.poke(addr.U)

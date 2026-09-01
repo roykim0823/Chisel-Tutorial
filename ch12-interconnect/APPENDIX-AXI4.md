@@ -134,7 +134,7 @@ address, absorb data beats until `last`, then answer on B.
   <img src="figures/axi4-write-burst.png" alt="AXI4 four-beat INCR write burst" width="700">
 </p>
 
-***Figure 12.12** — A four-beat INCR write burst, captured from `Axi4Memory`.
+***Figure 12.13** — A four-beat INCR write burst, captured from `Axi4Memory`.
 Grey marks a don't-care: a payload is only meaningful while its channel's
 `VALID` is asserted.*
 
@@ -190,7 +190,7 @@ or comparison against the length is needed.
   <img src="figures/axi4-read-burst.png" alt="AXI4 four-beat INCR read burst with backpressure" width="700">
 </p>
 
-***Figure 12.13** — A four-beat INCR read burst, with the master stalling on the
+***Figure 12.14** — A four-beat INCR read burst, with the master stalling on the
 second beat.*
 
 The mirror image of the write: one `ARID = 2` / `ARLEN = 3` handshake in cycle
@@ -236,14 +236,14 @@ holds `0x55` and word 1 holds `0x66`:
   <img src="figures/axi4-fixed-burst.png" alt="AXI4 two-beat FIXED read burst" width="600">
 </p>
 
-***Figure 12.14** — `ARBURST = FIXED`: both beats return `0x55`, the address never
+***Figure 12.15** — `ARBURST = FIXED`: both beats return `0x55`, the address never
 moves.*
 
 <p align="center">
   <img src="figures/axi4-incr-burst.png" alt="AXI4 two-beat INCR read burst" width="600">
 </p>
 
-***Figure 12.15** — `ARBURST = INCR`, everything else identical: the second beat
+***Figure 12.16** — `ARBURST = INCR`, everything else identical: the second beat
 returns `0x66` from the next word.*
 
 Every other signal in the two figures is the same, down to the cycle. The whole
@@ -333,7 +333,7 @@ transactions may complete out of order, but a burst, once started, runs to its
   <img src="figures/axi4-ooo.png" alt="AXI4 out-of-order read completion" width="700">
 </p>
 
-***Figure 12.16** — Two reads issued in one order and answered in the other.*
+***Figure 12.17** — Two reads issued in one order and answered in the other.*
 
 Both commands go out back to back: `ARID = 1` for address `0x0` in cycle 2,
 `ARID = 0` for address `0x4` in cycle 3. `ARREADY` then drops, because both
@@ -370,6 +370,19 @@ The memory is initialised so that word *n* holds `0x100 + n`, which is what
 makes the data check meaningful: `0x101` can only have come from the word the
 id-0 request addressed, so the beat is provably matched to the right
 transaction and not merely to the right order.
+
+Two boundaries the ids do not cover:
+
+- **A tag says *which*, not *whether*.** Success is a separate field: the `resp`
+  code on the B and R channels — `AxiResp.okay` / `exOkay` / `slvErr` /
+  `decErr`, defined in `src/main/scala/axi/AxiResp.scala`. Every slave here
+  answers `okay`; a real one reports `slvErr` on a failed access and a decoder
+  `decErr` for an unmapped address ([A.6](#a6-what-these-models-leave-out)).
+- **Whether a write is answered at all is another dimension.** AXI's B channel
+  makes writes *non-posted*: the master gets a response, carrying the id of the
+  write it belongs to. A **posted** write gets none — PCIe posts memory writes
+  and recovers ordering by other rules, trading the round trip for the loss of
+  "the write has landed" as an observable event.
 
 ---
 

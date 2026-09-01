@@ -12,8 +12,9 @@ import chisel3._
 // one (hold the command until `ack` arrives), or a pipelined one equally well.
 //
 // Which of those a device implements is a property of the device, not of this
-// bundle -- Sections 12.2 to 12.4 build the same four counters behind this one
-// port under each scheme in turn.
+// bundle -- Sections 12.3.1 to 12.3.3 build the same four counters behind this
+// one port under each scheme in turn, and Section 12.4 puts a UART-style bridge
+// behind it.
 class ReqAckIO(addrWidth: Int) extends Bundle {
   val address = Input(UInt(addrWidth.W))
   val rd = Input(Bool())

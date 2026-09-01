@@ -3,7 +3,7 @@ package wishbone
 import chisel3._
 import chisel3.util.log2Ceil
 
-// Wishbone signals, named as in the specification and in Figures 12.5 and 12.6:
+// Wishbone signals, named as in the specification and in Figures 12.7 and 12.8:
 // from the *master's* point of view, `_O` is an output of the master and `_I` an
 // input. A slave therefore declares `Flipped(new WishboneIO(n))`.
 class WishboneIO(addrWidth: Int) extends Bundle {
@@ -18,7 +18,7 @@ class WishboneIO(addrWidth: Int) extends Bundle {
 }
 
 // The same four free-running loadable counters as `CounterDevice`, but behind a
-// classic Wishbone slave that answers *asynchronously* (Figure 12.5): `ack` and
+// classic Wishbone slave that answers *asynchronously* (Figure 12.7): `ack` and
 // the read data are combinational functions of the request, so a transfer takes
 // a single clock cycle -- and the address decoding sits on the critical path.
 class WishboneCounter extends Module {
@@ -86,7 +86,7 @@ class WishboneCounterWait(val waitStates: Int = 2) extends Module {
   }
 }
 
-// The same device with a *synchronous* (registered) slave, Figure 12.6: `ack`
+// The same device with a *synchronous* (registered) slave, Figure 12.8: `ack`
 // is a register, so it rises one cycle after the request and every transfer
 // takes two cycles. The combinational path from `cyc`/`stb`/`adr` back to the
 // master is gone, which is the whole point -- the price is the extra cycle.

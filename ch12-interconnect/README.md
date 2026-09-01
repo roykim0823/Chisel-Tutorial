@@ -34,23 +34,25 @@ exactly one clock cycle, fixed in advance, so there is still nothing to say.
 
 **[12.3](#123-handshake-schemes) — handshaking.** Devices now take a *varying*
 number of cycles, so only the device knows when it is done, and it has to say
-so on a wire. Five ways to say it, each built as the same four counters so that
-the handshake is the only difference:
+so on a wire. Five ways to say it — the first three built here as the same four
+counters, so the handshake is the only difference, and the last two built later,
+where their hardware lives:
 
 | Scheme | The rule | Costs |
 |---|---|---|
 | [combinational](#1231-the-combinational-handshake) | `ack` comes back in the request cycle | a long path master → decoder → slave → master, which limits the clock |
 | [pipelined](#1232-the-pipelined-handshake) | request lasts one cycle, `ack` arrives later | must remember which command an `ack` belongs to |
 | [registered](#1233-the-registered-handshake) | `ack` from a flip-flop, request held until it comes | the bus is busy for two cycles per transfer |
-| [ready/valid](#1235-readyvalid-the-two-sided-handshake) | both sides can stall: transfer only when `ready` *and* `valid` | one channel per direction, so a transaction needs several |
-| [tagged](#1236-tagged-completion-answering-out-of-order) | every command carries an id, every answer repeats it | a table of outstanding commands in the slave |
+| [ready/valid](#readyvalid-the-two-sided-handshake) (§12.4) | both sides can stall: transfer only when `ready` *and* `valid` | one channel per direction, so a transaction needs several |
+| [tagged](APPENDIX-AXI4.md#a4-transaction-ids-and-out-of-order-completion) (appendix) | every command carries an id, every answer repeats it | a table of outstanding commands in the slave |
 
 [Section 12.3.4](#1234-the-three-schemes-compared) measures the first three
 against each other: pipelined manages 1 transfer per cycle, registered 1 per 2,
 and combinational 1 per cycle when the device answers at once but 1 per 3 once
-it needs two wait states. [Section
-12.3.7](#1237-handshakes-this-chapter-does-not-build) names the schemes this
-chapter does *not* build.
+it needs two wait states. The last two rows are built later — ready/valid in
+12.4, tagging in the appendix — and [Section
+12.3.5](#1235-handshakes-this-chapter-does-not-build) names the schemes this
+chapter does *not* build at all.
 
 **[12.4](#124-memory-mapped-devices) — devices in an address map.** A UART-like
 device gets an address range, and `MemMappedRV` bridges the bus to a
@@ -164,10 +166,23 @@ the only part of the on-chip bus with no protocol in it at all — just wiring:
 ```scala
 class BusDecoder(val devices: Int = 4, val addrWidth: Int = 8,
                  val deviceBytes: Int = 16) extends Module {
-  ...
+  require(devices >= 2, "a decoder needs at least two devices to choose between")
+
+  private val lo = log2Ceil(deviceBytes)  // log2Ceil rounds up to the next integer, so 16 bytes -> 4 bits
+  private val sel = log2Ceil(devices)
+  require(addrWidth >= lo + sel,
+    s"$addrWidth address bits cannot select $devices devices of $deviceBytes bytes")
+
+  val io = IO(new Bundle {
+    val address = Input(UInt(addrWidth.W))
+    val deviceRdData = Input(Vec(devices, UInt(32.W)))  // one input per device
+    val cs = Output(Vec(devices, Bool()))               // chip selects
+    val rdData = Output(UInt(32.W))                     // the read mux output
+  })
+
   // Each device owns `deviceBytes` of the address space, so the bits below that
   // window address *within* a device, and only the bits above it choose one.
-  private val index = io.address(lo + sel - 1, lo)
+  private val index = io.address(lo + sel - 1, lo)  // the upper bits of the address select the device
 
   for (i <- 0 until devices) {
     io.cs(i) := index === i.U
@@ -176,7 +191,7 @@ class BusDecoder(val devices: Int = 4, val addrWidth: Int = 8,
 }
 ```
 
-Those three lines are the whole of Figure 12.2: `index` is the address decode,
+The last four lines are the whole of Figure 12.2: `index` is the address decode,
 the `for` loop fans it out into one-hot chip selects, and
 `io.deviceRdData(index)` is the read multiplexer that replaces the tri-state
 data bus — a `Vec` indexed by hardware, which Chisel elaborates into the mux the
@@ -318,11 +333,20 @@ acknowledgment.
 
 ## 12.3 Handshake schemes
 
-Up to here the master knew the timing. With a fixed single-cycle bus — or the
-fixed one-cycle-later variant — "the transfer is finished" is something the
-master can *count* rather than observe, and no signal has to say it. A device
-with variable latency breaks that arrangement, because the only party that knows
-when the data is good is the device. So the timing contract moves onto a wire:
+Up to here the master knew the timing in advance, though the two buses knew it
+differently. The off-chip bus of [Section 12.1](#121-a-classic-microprocessor-bus)
+has no bus clock at all: the CPU budgets the worst-case access time of the
+slowest device and samples once that time has passed — which from the CPU's own
+side still spans several of its clock cycles, three or more T-states on a Z80.
+The on-chip bus of [Section 12.2](#122-an-on-chip-bus) is clocked, and there we
+*assumed* one cycle per transfer, or read data one cycle later in the variant
+above. That was an assumption for very small systems, not a property of buses.
+
+What both have in common is that "the transfer is finished" is something the
+master can *count* rather than observe: however many cycles a transfer takes,
+the number is fixed in advance and built into the master. A device with variable
+latency breaks that arrangement, because the only party that knows when the data
+is good is the device. So the timing contract moves onto a wire:
 the master **requests** by asserting `rd` or `wr`, and the slave
 **acknowledges** with `ack` when the transfer is complete. A device that needs
 longer simply keeps `ack` low, and the cycles it inserts that way are called
@@ -367,45 +391,24 @@ class ReqAckIO(addrWidth: Int) extends Bundle {
 ```
 
 Seven wires: an address, a read and a write strobe, the two data directions, a
-byte mask, and an acknowledgment. Nothing in them fixes *when* `ack` may rise —
-that is the handshake, and it is a property of the device rather than of the
-port. What changes between the three schemes is the slave's logic, not this
-declaration. Nothing in the types enforces a scheme either: a slave that
-acknowledges too early, or a master that lets go of its request too soon, is a
-type-correct Chisel design and a broken bus.
+byte mask, and an acknowledgment. Nothing in the port says *when* `ack` may
+rise — that is the handshake, and it belongs to the device rather than to the
+declaration, which is why all three schemes fit behind this one bundle, driving
+the same device.
 
-The device behind that port is **the same four counters** every time, so that
-nothing but the handshake varies: four 32-bit counters at word addresses `0x0`,
-`0x4`, `0x8` and `0xc`, each incrementing on every clock cycle, and each
-writable — a write loads a new value into one counter. Free-running counters are
-what make the timing visible in the *data* and not only in the waveform: because
-the value moves every cycle, the number a read returns depends on exactly which
-cycle the device sampled it, so a scheme that answers one cycle later answers
-with a different number.
-
-The three subsections come in the order the schemes are usually met: the
-same-cycle handshake first, then the pipelined one that removes its combinational
-path, and last the registered one that sits between them — the halfway house a
-first design tends to reach for. [Section 12.3.4](#1234-the-three-schemes-compared)
-then measures what each one actually costs.
-
-Those three exhaust the req/ack family, not handshaking. Two further schemes are
-built elsewhere in this chapter and get a subsection of their own here, because
-they answer questions `ack` cannot:
-[Section 12.3.5](#1235-readyvalid-the-two-sided-handshake) is **ready/valid**,
-where the *receiver* can stall too (`MemMappedRV`, `RegFifo`, and every AXI
-channel), and [Section 12.3.6](#1236-tagged-completion-answering-out-of-order)
-is **tagged completion**, where a response names the transaction it belongs to
-and may therefore overtake another (`Axi4OooReadMemory`).
-[Section 12.3.7](#1237-handshakes-this-chapter-does-not-build) then names the
-families that are real but unbuilt here, so the boundary of the chapter is
-explicit rather than implied.
+Two further handshakes are built later, each where its hardware lives:
+**ready/valid** in [Section 12.4](#readyvalid-the-two-sided-handshake), and
+**tagged completion** in [the AXI4 appendix](APPENDIX-AXI4.md#a4-transaction-ids-and-out-of-order-completion).
+[Section 12.3.5](#1235-handshakes-this-chapter-does-not-build) names the ones
+this chapter does not build at all.
 
 ### 12.3.1 The combinational handshake
 
-The simplest handshake reacts within the request cycle: the processor drives
-the address bus (`address`) and the read signal (`rd`) in cycle 2, and `ack`
-must react **combinationally**, within that same first clock cycle.
+In the simplest handshake `ack` is **combinational in the request**: the
+processor drives the address bus (`address`) and the read signal (`rd`) in
+cycle 2, and `ack` reacts through gates rather than on a clock edge. A device
+that is ready can therefore answer inside that same cycle; a slower one leaves
+`ack` low for a while, which is the case Figure 12.3 draws.
 
 <p align="center">
   <img src="figures/bus-ack.png" alt="A read transaction with a combinational acknowledge" width="560">
@@ -438,6 +441,8 @@ Built against this chapter's own port, the scheme is almost entirely wire:
 `src/main/scala/soc/CounterDevice.scala`
 ```scala
 class CounterDeviceComb(val waitStates: Int = 0) extends Module {
+  require(waitStates >= 0, "waitStates cannot be negative")
+
   val io = IO(new ReqAckIO(4))
 
   val cntRegs = RegInit(VecInit(Seq.fill(4)(0.U(32.W))))
@@ -449,22 +454,135 @@ class CounterDeviceComb(val waitStates: Int = 0) extends Module {
 
   io.ack := active && done              // combinational in the request
   io.rdData := cntRegs(idx)
-  ...
+
+  when(!active) {
+    waitReg := 0.U                      // no transfer in progress
+  }.elsewhen(!done) {
+    waitReg := waitReg + 1.U            // still counting out the access time
+  }.otherwise {
+    waitReg := 0.U                      // acked this cycle; rearm
+  }
+
+  for (i <- 0 until 4) {
+    cntRegs(i) := cntRegs(i) + 1.U
+  }
+  when(io.ack && io.wr) {
+    cntRegs(idx) := io.wrData
+  }
 }
 ```
 
-`waitStates` is the device's access time. At `0` the `done` term is always true,
-`ack` collapses to `active`, and a transfer finishes inside its request cycle.
+The device itself is four 32-bit counters in a `Vec` (`cntRegs`), with `idx`
+selecting one of them. The `for` loop increments all four unconditionally — no
+`when`, nothing to do with `rd` or `wr` — so each counter runs off the clock
+alone (*free-running*) and counter 0 reads 0, 1, 2, 3, … on successive cycles.
+The address chooses *which* counter to read; it does not freeze that counter's
+value, so reading the same address twice returns different numbers.
+
+That is the point of using counters rather than plain registers: the value a
+read returns tells you **which cycle the device sampled it**, so the latency
+differences between the schemes show up in the data and not only in a waveform.
+All three classes — `CounterDeviceComb` here, `CounterDevice` in 12.3.2, and
+`CounterDeviceReg` in 12.3.3 — live in `src/main/scala/soc/CounterDevice.scala`
+and carry this identical counter block. Only the handshake around it differs, so
+everything said here about the counters holds for all three.
+
+`waitStates` is the device's access time, counted in clock cycles. At `0` the
+`done` term is always true, `ack` collapses to `active`, and a transfer finishes
+inside its request cycle.
 At `2` this is Figure 12.3 exactly: the ack stays low for the request cycle and
 the one after, and rises in the third, while the master holds `rd` throughout
 because it has no way to know when the answer is coming.
 
 Either way `ack` is **combinational in the request** — `active` is *this*
 cycle's `rd || wr`, so the path from the master's request through the device and
-back to its `ack` input never crosses a flip-flop. A test pins that down with no
-clock stepping at all: assert the request, see the ack, withdraw the request,
-and the ack is gone in the same cycle. A registered ack could not do that, and
-this is precisely the path that limits the clock frequency.
+back to its `ack` input never crosses a flip-flop. That is precisely the path
+that limits the clock frequency.
+
+#### Checking it
+
+The defining property is testable without stepping the clock at all: assert the
+request and the ack is already there; withdraw the request and it disappears in
+the same instant. A registered ack could do neither.
+
+`src/test/scala/CounterDeviceTest.scala`
+```scala
+  "A combinational ReqAckIO device" should "answer inside the request cycle" in {
+    test(new CounterDeviceComb()) { dut =>
+      dut.io.address.poke(0.U)
+      dut.io.rd.poke(true.B)
+      // No clock step: with no wait states the ack is already there.
+      dut.io.ack.expect(true.B, "a combinational ack lands in the request cycle")
+
+      // And it is a wire, not a flop: withdrawing the request withdraws the ack
+      // in the same cycle.
+      dut.io.rd.poke(false.B)
+      dut.io.ack.expect(false.B, "ack tracks rd within the cycle")
+    }
+  }
+```
+
+The two rate tests put numbers on the wait states. Both drive the same helper,
+which holds `rd` high for a whole window and counts the acks:
+
+```scala
+  private def reqAckRate(dut: ReqAckIO, clock: Clock, cycles: Int): Int = {
+    dut.address.poke(0.U)
+    dut.wrData.poke(0.U)
+    dut.wrMask.poke(15.U)
+    dut.wr.poke(false.B)
+    dut.rd.poke(true.B)                  // request held high throughout
+    var acks = 0
+    for (_ <- 0 until cycles) {
+      clock.step()
+      if (dut.ack.peekBoolean()) acks += 1
+    }
+    acks
+  }
+
+  it should "sustain one transfer per cycle with no wait states" in {
+    test(new CounterDeviceComb(0)) { dut =>
+      assert(reqAckRate(dut.io, dut.clock, 12) == 12,
+        "a zero-wait combinational device acks every cycle")
+    }
+  }
+
+  it should "drop to one per three cycles with two wait states" in {
+    test(new CounterDeviceComb(2)) { dut =>
+      assert(reqAckRate(dut.io, dut.clock, 12) == 4,
+        "two wait states means one transfer per three cycles")
+    }
+  }
+```
+
+At zero wait states every cycle carries a transfer, so 12 cycles give 12 acks.
+At two wait states the device answers every third cycle, so the same window
+gives 4. That ratio — full rate versus a third of it — is the access time
+showing up as throughput.
+
+```
+sbt 'testOnly CounterDeviceTest -- -z "combinational"'
+```
+
+```
+[info] CounterDeviceTest:
+[info] CounterDevice
+[info] CounterDevice
+[info] A pipelined slave
+[info] A combinational ReqAckIO device
+[info] - should answer inside the request cycle
+[info] - should sustain one transfer per cycle with no wait states
+[info] - should drop to one per three cycles with two wait states
+[info] A registered ReqAckIO device
+[info] Run completed in 1 second, 88 milliseconds.
+[info] Total number of tests run: 3
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 3, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+(`-z` filters by test name; the bare subject lines are the other groups in the
+suite, which the filter skipped.)
 
 Same-cycle acknowledgment has been criticized — a single-cycle transaction is
 rarely realistic in a larger system — leading to the **SimpCon** proposal: a
@@ -474,11 +592,11 @@ between processor, address decoding, and device.
 
 ### 12.3.2 The pipelined handshake
 
-A pipelined handshake avoids the single-cycle combinational loop: a read or
+A pipelined handshake avoids that combinational path altogether: a read or
 write command is signaled by asserting `rd` or `wr` for a single clock cycle
 (address and, for a write, the write data must be valid during that cycle —
 commands are valid for one cycle only), and each command must be acknowledged
-by an active `ack` **the earliest
+by an active `ack` **at the earliest
 one cycle after the command** — later still if the device needs to insert
 **wait states** by delaying `ack`. Read data is available together with `ack`,
 for one clock cycle.
@@ -519,10 +637,16 @@ and peripherals each connect via such an interface to a switching fabric, and
 if the system has more than one master, the fabric must **arbitrate** among
 masters requesting reads or writes.
 
-`CounterDevice` is that scheme built: four free-running 32-bit counters you can
-read and load. Because the read result arrives the cycle *after* the command,
-and the command is valid only during that cycle, it **registers the address**
-(`addrReg`) and **delays the ack** (`ackReg`):
+`CounterDevice` is that scheme built, on the same four counters — but at the
+protocol's *minimum* latency, not at Figure 12.4's. Its `ackReg := io.rd ||
+io.wr` acknowledges every command exactly one cycle later and has no way to wait
+longer, so it produces the back-to-back reads of cycles 5–7 and never the wait
+state in the figure's first read; inserting one would take a device that holds
+`ack` low, as `CounterDeviceComb(waitStates = 2)` does in
+[Section 12.3.1](#1231-the-combinational-handshake). Because the read result
+arrives the cycle *after* the command, and the command is valid only during that
+cycle, it **registers the address** (`addrReg`) and **delays the ack**
+(`ackReg`):
 
 `src/main/scala/soc/CounterDevice.scala`
 ```scala
@@ -556,17 +680,21 @@ low address bits select a byte within a word and only the upper two bits
 (`address(3, 2)`) select one of the four counters.
 
 The counters themselves are a small **register file**: a `Reg` of a `Vec`,
-initialized to all zeros by building a Scala `Seq` with `Seq.fill` (four
-Chisel `0.U(32.W)` constants) and passing it to `VecInit`. Each counter is
-free-running — it increments by one every cycle — except when a write
-overwrites it that cycle.
+initialized to all zeros by building a Scala `Seq` with `Seq.fill` (four Chisel
+`0.U(32.W)` constants) and passing it to `VecInit`. A write and that cycle's
+increment target the same register, and last connection wins — so the written
+value lands and the counter carries on from there.
+
+#### Checking it
 
 `CounterDeviceTest` wraps the protocol in `read()`/`write()` helpers that poll
 `ack` — a clean pattern for driving a pipelined interface from a test. `step`
-takes a default argument, and `read` is a nested function closing over `dut`:
+takes a default argument, and `read` and `write` are nested functions closing
+over `dut`:
 
 `src/test/scala/CounterDeviceTest.scala`
 ```scala
+  "CounterDevice" should "read, advance, and load counters" in {
     test(new CounterDevice()) { dut =>
       def step(n: Int = 1) = dut.clock.step(n)
 
@@ -578,7 +706,37 @@ takes a default argument, and `read` is a nested function closing over `dut`:
         while (!dut.io.ack.peekBoolean()) step()   // wait for the delayed ack
         dut.io.rdData.peekInt()
       }
+      def write(addr: Int, data: Int) = {
+        dut.io.address.poke(addr.U)
+        dut.io.wrData.poke(data.U)
+        dut.io.wr.poke(true.B)
+        step()
+        dut.io.wr.poke(false.B)
+        while (!dut.io.ack.peekBoolean()) step()
+      }
+
+      for (i <- 0 until 4) assert(read(i * 4) < 10, s"counter $i just started")
+      step(100)
+      for (i <- 0 until 4) assert(read(i * 4) > 100, s"counter $i advanced")
+      write(2 * 4, 0)
+      write(3 * 4, 1000)
+      assert(read(2 * 4) < 5, "counter reset")
+      assert(read(3 * 4) > 1000, "counter loaded")
+    }
+  }
 ```
+
+The helpers hide the one thing that makes this protocol different from the
+other two: the command is dropped after a single `step()`, and only *then* does
+the test wait for `ack`. A combinational or registered device would have to keep
+`rd` asserted through that wait.
+
+The assertions use the free-running counters as a clock the test can read. Right
+after reset every counter is below 10; after 100 idle cycles every one of them
+is above 100, which proves they advance without any bus activity. Then a write
+loads counter 2 with 0 and counter 3 with 1000, and the read-back shows both
+values *plus* the cycles that have elapsed since — "counter reset" checks `< 5`,
+not `== 0`, because the counter kept going while the read was in flight.
 
 *Scala note — default arguments → [§C.7](../SCALA-NOTES.md#c7-default-arguments), nested (local) functions & closures → [§C.8](../SCALA-NOTES.md#c8-nested-local-functions--closures); string interpolation `s"…"` → [§J.5](../SCALA-NOTES.md#j5-string-interpolation-s).*
 
@@ -587,6 +745,30 @@ every pin poked and expected by hand — as `"CounterDevice" should "work"`. The
 two are meant to be read side by side; [Chapter 13
 §13.2–13.2.1](../ch13-debugging-testing-verification/README.md#132-testing-in-chisel)
 uses exactly this pair to make the case for wrapping a protocol in functions.
+Both run with:
+
+```
+sbt 'testOnly CounterDeviceTest -- -z "CounterDevice"'
+```
+
+```
+[info] CounterDeviceTest:
+[info] CounterDevice
+[info] - should work
+[info] CounterDevice
+[info] - should read, advance, and load counters
+[info] A pipelined slave
+[info] A combinational ReqAckIO device
+[info] A registered ReqAckIO device
+[info] Run completed in 985 milliseconds.
+[info] Total number of tests run: 2
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 2, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+The throughput claim — one transfer per cycle — is measured separately, in
+[Section 12.3.4](#1234-the-three-schemes-compared).
 
 ### 12.3.3 The registered handshake
 
@@ -595,9 +777,9 @@ usually reaches for: keep the master holding its request, as the
 combinational handshake does, but drive `ack` out of a **flip-flop** so nothing
 combinational runs from the master, through address decoding, and back.
 
-That single change buys the timing closure the combinational scheme costs. It
-does *not* buy back the bus: the master must still keep `address` and `rd`/`wr`
-asserted until the ack arrives, so a transfer occupies the request cycle plus
+That one change removes the long combinational path. It does *not* free the
+bus: the master must still keep `address` and `rd`/`wr` asserted until the ack
+arrives, so a transfer occupies the request cycle plus
 the ack cycle and nothing else can be issued meanwhile.
 
 `src/main/scala/soc/CounterDevice.scala`
@@ -618,7 +800,14 @@ class CounterDeviceReg extends Module {
   val dataReg = RegInit(0.U(32.W))
   dataReg := cntRegs(idx)
   io.rdData := dataReg
-  ...
+
+  for (i <- 0 until 4) {
+    cntRegs(i) := cntRegs(i) + 1.U
+  }
+  // The write lands in the first cycle of the transfer, the ack in the second.
+  when(active && !ackReg && io.wr) {
+    cntRegs(idx) := io.wrData
+  }
 }
 ```
 
@@ -627,7 +816,11 @@ class CounterDeviceReg extends Module {
 </p>
 
 ***Figure 12.5** — Two reads over a registered handshake, captured from
-`CounterDeviceReg`. Grey marks a don't-care.*
+`CounterDeviceReg`. Grey marks a don't-care. Where Figures 12.3 and 12.4 are
+protocol drawings, with symbolic `A1`/`D1` standing for any address and any
+data, this one and the captures that follow (12.9–12.12) show the actual
+simulated values of the module named in the caption — hence a real address
+`0x0` and real counter readings.*
 
 The shape of the cost is right there. `rd` goes high in cycle 2 and stays high
 until cycle 5, because the master cannot know when the ack is coming; `ack`
@@ -636,19 +829,34 @@ four cycles — and cycle 4, where the device is idle but the bus is not free, i
 the price of holding the request. Compare Figure 12.4, where the same two reads
 would occupy cycles 2 and 3 alone.
 
+Both reads address counter `0x0` yet return 1 and 3, because it free-runs
+([Section 12.3.1](#1231-the-combinational-handshake)): the two acks sample it two
+cycles apart. Cycle by cycle, with `rd` held from cycle 2 to 5 — `rd`, `rdData`,
+and `ack` are as simulated, and `cntRegs(0)` follows from `dataReg :=
+cntRegs(idx)`, which makes each cycle's counter value the next cycle's `rdData`:
+
+| Cycle | `rd` | `cntRegs(0)` | `rdData` | `ack` |
+|---|---|---|---|---|
+| 1 | 0 | 0 | 0 | 0 |
+| 2 | 1 | 1 | 0 | 0 |
+| 3 | 1 | 2 | **1** | **1** ← first read completes |
+| 4 | 1 | 3 | 2 | 0 |
+| 5 | 1 | 4 | **3** | **1** ← second read completes |
+| 6 | 0 | 5 | 4 | 0 |
+
+The counter never stops, so `rdData` changes every cycle; what the handshake
+decides is *which* of those values the master is entitled to take. Cycle 4 is
+the wasted one — the request is still up, the counter still runs, but `ackReg`
+is low because it acknowledged in cycle 3 and `&& !ackReg` keeps the pulse one
+cycle wide.
+
 The `&& !ackReg` is where a first attempt goes wrong, and the reason is exactly
 the property that defines the scheme. Because the master holds its request
 *through* the ack cycle, a plain `ackReg := active` sees the same request still
 asserted in that cycle and acknowledges it a second time — one command, two
 acks. Guarding with `!ackReg` keeps the pulse one cycle wide. The same guard
-appears on the write, so a held request cannot store its data twice:
-
-`src/main/scala/soc/CounterDevice.scala`
-```scala
-  when(active && !ackReg && io.wr) {
-    cntRegs(idx) := io.wrData
-  }
-```
+sits on the write in the class above — `when(active && !ackReg && io.wr)` — so a
+held request cannot store its data twice either.
 
 In the generated code the acknowledgment is a flip-flop read out through an
 `assign`, where the combinational device of Section 12.3.1 had a bare wire:
@@ -660,10 +868,14 @@ In the generated code the acknowledgment is a flip-flop read out through an
   assign io_ack = ackReg;
 ```
 
-And the cost is measurable. Holding the request high continuously, so the device
-is never idle for want of work, it still answers only every other cycle:
+#### Checking it
 
-`src/test/scala/HandshakeStylesTest.scala`
+The cost is measurable with the same `reqAckRate` helper the combinational
+device used in [Section 12.3.1](#1231-the-combinational-handshake): hold `rd`
+high for twelve cycles and count the acks. The device is never idle for want of
+work, and still only half those cycles carry a transfer.
+
+`src/test/scala/CounterDeviceTest.scala`
 ```scala
   "A registered ReqAckIO device" should "manage one transfer every two cycles" in {
     test(new CounterDeviceReg()) { dut =>
@@ -676,10 +888,45 @@ is never idle for want of work, it still answers only every other cycle:
   }
 ```
 
-This is not a strawman: it is what a **synchronous Wishbone slave** does, and
-[Section 12.5](#wishbone) builds exactly this device again against the Wishbone
-signal set, where Figure 12.7 shows its timing. Half the fix, in other words, is
-what a real and widely used protocol settles for.
+Six acks in twelve cycles, against the combinational device's twelve in twelve
+at zero wait states — the same hardware, the same counters, one flip-flop of
+difference in the ack path.
+
+```
+sbt 'testOnly CounterDeviceTest -- -z "registered"'
+```
+
+```
+[info] CounterDeviceTest:
+[info] CounterDevice
+[info] CounterDevice
+[info] A pipelined slave
+[info] A combinational ReqAckIO device
+[info] A registered ReqAckIO device
+[info] - should manage one transfer every two cycles
+[info] Run completed in 888 milliseconds.
+[info] Total number of tests run: 1
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 1, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+What the lost cycle buys is simplicity on both sides. The command is still on
+the wires when the ack arrives, so neither end has to remember anything:
+`CounterDeviceReg` indexes `io.address` directly where the pipelined
+`CounterDevice` needs an `addrReg`, and a master needs no way to match a late
+response to the command that caused it. Wait states come free — hold `ack` low
+as long as you like, since the master is parked anyway.
+
+So this is not a strawman. A **synchronous Wishbone slave** works exactly this
+way, and [Section 12.5](#wishbone) builds this device again against the Wishbone
+signal set, where Figure 12.8 shows its timing. ARM's **APB** — the peripheral
+bus in most ARM SoCs — makes the same bargain from the other direction: address
+and write data are held across a setup and an access phase, two cycles minimum
+per transfer, no pipelining, and `PREADY` stretches it further. Intel's
+**Avalon-MM** behaves the same way in its basic `waitrequest` mode. The pattern
+is normal for control and configuration registers, where transfers are rare and
+a simple master matters more than throughput.
 
 ### 12.3.4 The three schemes compared
 
@@ -706,6 +953,14 @@ Every other row is a consequence of those two:
 | Combinational path master→slave→master | **yes** | no | no |
 | Measured throughput | 1 per cycle with no wait states, 1 per 3 with two | 1 per 2 cycles | **1 per cycle** |
 
+Read as a choice rather than a taxonomy, each column has a shape:
+
+| Scheme | Pros | Cons | Choose it when |
+|---|---|---|---|
+| **Combinational** | fastest possible transfer — one cycle when the device is ready; simplest slave (no state in the ack path); wait states cost nothing to add | the master→decoder→slave→master path caps the clock frequency, and it gets worse with every device added to the decode | the system is small and slow-clocked, or the device is a handful of registers |
+| **Registered** | no combinational path, so timing closes; still one transaction at a time, so no ordering to track on either side; the slave can read `address` directly instead of capturing it | half the throughput — two cycles per transfer even when the device is instantly ready; the bus is blocked for the whole transaction | peripherals and control/status registers, where transfers are rare and a simple master matters most |
+| **Pipelined** | no combinational path *and* full throughput — one transfer per cycle sustained; the bus is free the cycle after the command | the master must remember what it asked for, and the slave must capture the address; latency is never below one cycle, even for a trivial device | the path carries real traffic — memory, DMA, a processor's data port |
+
 The registered style answers question 1 and stops there. It removes the
 combinational path — the master's `ack` input now comes straight out of a
 flop — but the master is still required to keep address and command asserted
@@ -722,8 +977,7 @@ that gets there. The price is bookkeeping: since `ack` no longer arrives while
 the request that caused it is still being driven, it refers to *a command
 issued some cycles ago*, and master and slave must agree on the order — which
 is exactly why `ReqAckToWishbone` in Section 12.5 needs a state machine, and
-why AXI eventually needs the transaction ids of
-[Section 12.3.6](#1236-tagged-completion-answering-out-of-order).
+why AXI eventually needs [transaction ids](APPENDIX-AXI4.md#a4-transaction-ids-and-out-of-order-completion).
 
 The fourth combination — a combinational `ack` with a single-cycle command — is
 degenerate rather than useful. If the master releases the request after one
@@ -731,13 +985,19 @@ cycle there is nothing left for a combinational `ack` to be a function of, so
 the slave would have to answer within that one cycle, and there would be no
 latency left to pipeline.
 
-`src/test/scala/HandshakeStylesTest.scala` measures the bottom row by keeping
-each slave maximally busy and counting completed transfers, so the throughputs
-above are numbers the build checks rather than claims:
+`src/test/scala/CounterDeviceTest.scala` measures the bottom row by keeping each
+slave maximally busy and counting completed transfers, so the throughputs above
+are numbers the build checks rather than claims. The combinational and
+registered rates are the `reqAckRate` tests of Sections 12.3.1 and 12.3.3; the
+pipelined one cannot use that helper, because it must issue a *new* command
+every cycle instead of holding one:
 
 ```scala
   "A pipelined slave" should "complete one transaction every cycle" in {
     test(new CounterDevice()) { dut =>
+      // Issue a new read every cycle without ever waiting for an ack. This is
+      // what the single-cycle command buys: the master never has to hold the
+      // bus, so a second request can go out while the first is still in flight.
       val n = 6
       var acks = 0
       for (i <- 0 until n) {
@@ -752,141 +1012,44 @@ above are numbers the build checks rather than claims:
   }
 ```
 
-### 12.3.5 Ready/valid: the two-sided handshake
+All three, side by side:
 
-Every scheme so far shares an asymmetry: the master decides when a transfer
-starts, and the slave only decides when it ends. Nothing lets the slave say *not
-yet, do not even start* — `ReqAckIO` has no wire for it, so a slave that cannot
-take a command must take it anyway and withhold `ack`. The **ready/valid**
-handshake of [Chapter 9](../ch09-communicating-state-machines/README.md#93-the-readyvalid-interface)
-removes the asymmetry: the producer raises `valid` when it has data, the
-consumer raises `ready` when it can accept data, and a transfer happens in
-exactly those cycles where both are high — what `Decoupled` calls `fire`.
-
-This is not a fourth row of the table above, because it answers a different
-question. Req/ack is a **transaction** handshake: one request, one response, the
-response bound to the request that caused it. Ready/valid is **flow control on
-one unidirectional channel**, with no notion of a response at all — so the two
-compose rather than compete, and a request/response protocol built on
-ready/valid needs one channel per direction plus a rule for pairing them up.
-Three properties follow, and all three matter later in the chapter:
-
-- **Backpressure is symmetric.** Either side can stall the other by holding its
-  flag low, so a slow consumer needs no separate "wait" signal.
-- **`valid` must not depend combinationally on `ready`** (or the reverse) — two
-  modules each waiting for the other's flag deadlock, and Chisel will not catch
-  it for you.
-- **A raised `valid` should not be withdrawn** before it is consumed. Chisel
-  spells the stronger promise `IrrevocableIO`, and AXI requires it: once
-  asserted, `VALID` stays asserted until the transfer completes.
-
-Two of this chapter's own modules speak it directly. `RegFifo` (borrowed from
-[Chapter 11](../ch11-example-designs/README.md)) is pure ready/valid on both
-sides:
-
-`src/main/scala/fifo/fifo.scala`
-```scala
-  io.enq.ready := !fullReg
-  io.deq.valid := !emptyReg
+```
+sbt "testOnly CounterDeviceTest"
 ```
 
-And `MemMappedRV` ([Section 12.4](#124-memory-mapped-devices)) is the place the
-two disciplines actually meet — pipelined req/ack facing the bus, ready/valid
-facing the device:
-
-`src/main/scala/soc/MemMappedRV.scala`
-```scala
-  statusReg := io.rx.valid ## io.tx.ready
-
-  ackReg := io.mem.rd || io.mem.wr
-  io.mem.ack := ackReg
+```
+[info] CounterDeviceTest:
+[info] CounterDevice
+[info] - should work
+[info] CounterDevice
+[info] - should read, advance, and load counters
+[info] A pipelined slave
+[info] - should complete one transaction every cycle
+[info] A combinational ReqAckIO device
+[info] - should answer inside the request cycle
+[info] - should sustain one transfer per cycle with no wait states
+[info] - should drop to one per three cycles with two wait states
+[info] A registered ReqAckIO device
+[info] - should manage one transfer every two cycles
+[info] Run completed in 1 second, 409 milliseconds.
+[info] Total number of tests run: 7
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 7, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
 ```
 
-Note what the bridge does *not* do: it never consults `io.tx.ready` before
-acknowledging a write, so it does not translate backpressure into wait states —
-it **exposes** it, as the two status bits software is expected to poll. That is
-the whole reason [Section 12.4](#124-memory-mapped-devices) needs the TDRE/RDRF
-status register, and the reason the no-deassert rule above is a correctness
-requirement there rather than a style note: software that polls "ready", then
-acts, must still find the condition true.
+### 12.3.5 Handshakes this chapter does not build
 
-The third place ready/valid appears is the one that matters most in practice.
-AXI applies it to **five independent channels**, so a transaction is no longer a
-handshake at all — it is reassembled from five separate transfers, which is why
-an AXI slave needs a state machine where a `ReqAckIO` slave needs none, and why
-`AxiLiteCounter` must accept AW and W in either order
-([Section 12.5](#axi)).
+The three schemes above are the request/acknowledge family in full. Two further
+handshakes are built in this repository, just not in this section:
+**ready/valid**, where the receiver can stall the sender as well
+([Section 12.4](#readyvalid-the-two-sided-handshake)), and **tagged
+completion**, where every command carries an id so that responses may come back
+in another order ([the AXI4 appendix](APPENDIX-AXI4.md#a4-transaction-ids-and-out-of-order-completion)).
 
-### 12.3.6 Tagged completion: answering out of order
-
-The pipelined scheme of [Section 12.3.2](#1232-the-pipelined-handshake) lets many
-commands be in flight, and pays with the bookkeeping named in
-[Section 12.3.4](#1234-the-three-schemes-compared): master and slave must agree
-on the order. That agreement is itself a cost. If responses must come back in
-the order the commands went out, one slow command holds up every command behind
-it however ready they are — **head-of-line blocking** — and the slave cannot use
-the freedom the pipelining bought it.
-
-The fix is to stop inferring which command a response belongs to and put the
-answer on the wires: every command carries an **id**, every response carries the
-id it belongs to, and the slave may then answer in whatever order it finishes.
-This is the last question in the family — after *when may `ack` rise?* and *who
-may stall whom?* comes **which transaction is this answer for?**
-
-That is what AXI4's tag is for. `Axi4Addr`, `Axi4RdData`, and `Axi4WrResp` all
-carry an `id`, and `Axi4OooReadMemory` — built and tested in
-[the AXI4 appendix](APPENDIX-AXI4.md) — is a slave that uses it: a table of
-`slots` accepted commands, each with an artificial `id * 4`-cycle delay standing
-in for a bank conflict or a cache miss, and a picker that serves whichever one
-finishes first:
-
-`src/main/scala/axi4/Axi4.scala`
-```scala
-  // --- pick the next burst to serve ---------------------------------------
-  val ready = VecInit((0 until slots).map(i => busyRegs(i) && delayRegs(i) === 0.U))
-  when(!servingReg && ready.reduce(_ || _)) {
-    servingReg := true.B
-    slotReg := PriorityEncoder(ready)
-  }
-```
-
-`src/test/scala/Axi4MemoryTest.scala` issues the slow command first and expects
-the fast one back first, which is exactly the behaviour the ids exist to make
-safe:
-
-```scala
-      sendAddr(dut.io.ar, dut.clock, id = 1, addr = 0, len = 0, burst = Axi4Burst.incr)
-      sendAddr(dut.io.ar, dut.clock, id = 0, addr = 4, len = 0, burst = Axi4Burst.incr)
-
-      dut.io.r.ready.poke(true.B)
-
-      while (!dut.io.r.valid.peekBoolean()) dut.clock.step()
-      dut.io.r.bits.id.expect(0.U, "the fast request comes back first")
-```
-
-Three boundaries are worth being precise about:
-
-- **Reordering is between transactions, not inside one.** AXI4 requires the
-  beats of a burst to be contiguous — read data of different ids may not be
-  interleaved (AXI3 allowed it and AXI4 dropped it) — so once
-  `Axi4OooReadMemory` starts a burst it runs to its `last` beat before another
-  id is served.
-- **A tag says *which*, not *whether*.** Success is a separate field: the `resp`
-  code on the B and R channels, `AxiResp.okay` / `exOkay` / `slvErr` / `decErr`
-  in `src/main/scala/axi/AxiResp.scala`. Every slave in this chapter answers
-  `okay`; a real one reports `decErr` for an address no slave claims.
-- **Whether a write is answered at all is its own dimension.** AXI's B channel
-  makes writes *non-posted* — the master gets a response — as does `wr`/`ack`
-  here. A **posted** write gets none: PCIe posts memory writes and recovers
-  ordering with explicit fences, trading the round trip for the loss of "the
-  write has landed" as an observable event.
-
-### 12.3.7 Handshakes this chapter does not build
-
-The five schemes above are the ones this chapter has hardware for. They are not
-the whole design space, and the families below are worth recognising by name
-even though nothing here implements them — no code in this repository backs this
-subsection, and the links are the reference.
+The families below are the ones with no hardware here at all. They are worth
+recognising by name, and the links are the reference.
 
 - **Credit-based flow control.** Instead of a per-transfer stall signal, the
   receiver grants the sender a number of **credits** — free buffer slots. The
@@ -954,11 +1117,68 @@ the designer wants:
 | 0xf010 | LEDs |
 | 0xf020 | Keys |
 
-Some IO devices, like the counter above, expose ordinary registers. Others —
-like a UART — expose a **ready/valid** interface instead (see the ready/valid
-interface in [Chapter 9](../ch09-communicating-state-machines/README.md#93-the-readyvalid-interface),
-and the UART shift registers in
-[Chapter 6](../ch06-sequential-building-blocks/README.md)). The common
+A map like this is decoded at **two levels**, and this chapter builds one module
+for each. The upper bits pick the device: that is `BusDecoder` from
+[Section 12.2](#the-read-multiplexer), whose default `deviceBytes = 16` is
+exactly the 16 bytes per device reserved above. The lower bits then pick a
+register *inside* the selected device, and how many of them are used is up to
+that device — `CounterDevice` and the UART bridge below both hold four words in
+their window, so both decode two bits with `address(3, 2)`, leaving the low two
+bits as the byte within a word. Everything above those bits is the decoder's
+business, not the device's.
+
+The two levels are built and tested separately here; wiring them into one
+system means routing `ack` back through the decoder as well as `rdData`, which
+`BusDecoder` deliberately leaves out — it predates the handshake entirely.
+
+### Ready/valid: the two-sided handshake
+
+The schemes of [Section 12.3](#123-handshake-schemes) share an asymmetry: the
+master decides when a transfer starts, and the slave only decides when it ends.
+Nothing lets the slave say *not yet, do not even start* — `ReqAckIO` has no wire
+for it, so a slave that cannot take a command must take it anyway and withhold
+`ack`. The **ready/valid** handshake of
+[Chapter 9](../ch09-communicating-state-machines/README.md#93-the-readyvalid-interface)
+removes the asymmetry: the producer raises `valid` when it has data, the
+consumer raises `ready` when it can accept data, and a transfer happens in
+exactly those cycles where both are high — what `Decoupled` calls `fire`.
+
+It is not a fourth request/acknowledge scheme, because it answers a different
+question. Req/ack is a **transaction** handshake: one request, one response,
+the response bound to the request that caused it. Ready/valid is **flow control
+on one unidirectional channel**, with no notion of a response at all — so the
+two compose rather than compete, and a request/response protocol built on
+ready/valid needs one channel per direction plus a rule for pairing them up.
+Three properties follow, and all three matter in this section and the next:
+
+- **Backpressure is symmetric.** Either side can stall the other by holding its
+  flag low, so a slow consumer needs no separate "wait" signal.
+- **`valid` must not depend combinationally on `ready`** (or the reverse) — two
+  modules each waiting for the other's flag deadlock, and Chisel will not catch
+  it for you.
+- **A raised `valid` should not be withdrawn** before it is consumed. Chisel
+  spells the stronger promise `IrrevocableIO`, and AXI requires it: once
+  asserted, `VALID` stays asserted until the transfer completes.
+
+Chisel ships the canonical example: `Queue` is a ready/valid FIFO, stalling its
+producer when full and its consumer when empty, and it is what this chapter uses
+wherever a buffer is needed. [Chapter
+11](../ch11-example-designs/README.md#112-generalized-fifos-readyvalid--inheritance)
+builds the same thing by hand, five ways.
+
+Where ready/valid matters most is the next section. AXI applies it to **five
+independent channels**, so a transaction is no longer a
+handshake at all — it is reassembled from five separate transfers, which is why
+an AXI slave needs a state machine where a `ReqAckIO` slave needs none, and why
+`AxiLiteCounter` must accept AW and W in either order
+([Section 12.5](#axi)).
+
+### A memory-mapped UART
+
+Some IO devices, like the counters of Section 12.3, expose ordinary registers.
+Others — like a UART, whose shift registers are built in
+[Chapter 6](../ch06-sequential-building-blocks/README.md) — expose a ready/valid
+interface instead. The common
 solution is to map the write and read channel onto one address (driving the
 corresponding `valid`/`ready` on the write or read command), and map the two
 flags into a **status register** at a different address so software can poll
@@ -981,91 +1201,335 @@ of the first serial port of the IBM PC, built around the
 [8250](https://en.wikipedia.org/wiki/8250_UART) UART chip — and it is still a
 valid design today.
 
-Polling a status register this way is only safe if, once asserted, `rx.valid`
-and `tx.ready` are **not allowed to be deasserted again** before being
-consumed — otherwise software could poll "ready", act on it, and find the
-condition gone. If a device cannot guarantee that, insert a one-word buffer
+Polling a status register this way is only safe under the no-withdraw rule
+above: once asserted, `rx.valid` and `tx.ready` must stay asserted until
+consumed, or software could poll "ready", act on it, and find the condition
+gone. If a device cannot guarantee that, insert a one-word buffer
 (register) on each of the two ready/valid channels between the memory-mapped
 interface and the device to restore the guarantee.
 
 The memory-mapped device needs no new port: it reuses the `ReqAckIO` declared in
 [Section 12.3](#123-handshake-schemes) at four address bits — with the pipelined
 handshake of [Section 12.3.2](#1232-the-pipelined-handshake) behind it, as above
-— so the whole chapter runs on one bus definition. Only `wrMask` goes unused here —
-this device moves whole words between the bus and a byte stream, so there is no
+— so the whole chapter runs on one bus definition. Only `wrMask` goes unused:
+the device moves whole words between the bus and a byte stream, so there is no
 sub-word write to mask.
 
+The four address bits are the device's 16-byte window, and `MemMappedRV` lays
+four 32-bit registers into it, word-aligned exactly as `CounterDevice` lays out
+its counters (`address(3, 2)` picks the word, the low two bits are the byte
+inside it):
+
+| Offset | Read | Write |
+|---|---|---|
+| `0x0` | status — RDRF, TDRE | control — interrupt enables |
+| `0x4` | receive data, pops `rx` | transmit data, pushes `tx` |
+| `0x8` | words received | — |
+| `0xc` | 0 | — |
+
+That is the book's two-register UART widened into the window it was already
+given. Software sees the same status and data registers — at 0xf000 and 0xf004
+rather than the book's 0xf000 and 0xf001, since these are words — plus two
+additions the extra address bits pay for: a **control** register holding the
+interrupt-enable mask, and a **count** of the words read out of the stream.
+
+`src/main/scala/soc/ReqAckIO.scala`
+```scala
+class ReqAckIO(addrWidth: Int) extends Bundle {
+  val address = Input(UInt(addrWidth.W))
+  val rd = Input(Bool())
+  val wr = Input(Bool())
+  val rdData = Output(UInt(32.W))
+  val wrData = Input(UInt(32.W))
+  val wrMask = Input(UInt(4.W))
+  val ack = Output(Bool())
+}
+```
+
+Put together, the device, its bus port, and the loopback that exercises it look
+like this:
+
+<p align="center">
+  <img src="figures/memmappedrv-block.png" alt="UseMemMappedRV block diagram" width="720">
+</p>
+
+***Figure 12.6** — `UseMemMappedRV`: a memory-mapped bridge and the FIFO that
+closes the loop. The bus port on the left is one `ReqAckIO`; on the right, `tx`
+and `rx` are `Decoupled`, so each carries `bits`/`valid` one way and `ready`
+back. Writing the data word pushes into the `Queue`, reading it pops out the
+other side — which is why anything written can be read back.*
+
 `MemMappedRV` bridges that bus to a `Decoupled` (ready/valid) stream:
-address 0 reads the status (`rx.valid ## tx.ready`), address 1 reads the receive
-data / writes the transmit data:
 
 `src/main/scala/soc/MemMappedRV.scala`
 ```scala
-statusReg := io.rx.valid ## io.tx.ready
-ackReg := io.mem.rd || io.mem.wr
-io.mem.rdData := Mux(addrReg === 0.U, statusReg, io.rx.bits)
-io.tx.bits := io.mem.wrData
-io.tx.valid := io.mem.wr
+class MemMappedRV[T <: Data](gen: T) extends Module {
+  val io = IO(new Bundle() {
+    val mem = new ReqAckIO(4)
+    val tx = Decoupled(gen)
+    val rx = Flipped(Decoupled(gen))
+    val irq = Output(Bool())
+  })
+
+  // The register map above, as named constants: these are `address(3, 2)`
+  // values, so byte offset 0x0 is word 0, 0x4 is word 1 and 0x8 is word 2.
+  // They are Chisel literals rather than Scala Ints so they can be used
+  // directly in `===` and as `switch`/`is` arms. Being constants they
+  // elaborate away -- the generated Verilog compares `idxReg` against 2'h0,
+  // 2'h1 and 2'h2, and holds no state for them.
+  private val status = 0.U(2.W)
+  private val data = 1.U(2.W)
+  private val count = 2.U(2.W)
+
+  val statusReg = RegInit(0.U(2.W))
+  val ctrlReg = RegInit(0.U(2.W))
+  val rxCountReg = RegInit(0.U(32.W))
+  val ackReg = RegInit(false.B)
+  val idxReg = RegInit(0.U(2.W))
+  val rdDlyReg = RegInit(false.B)
+
+  val idx = io.mem.address(3, 2)      // byte address -> which of the four words
+
+  statusReg := io.rx.valid ## io.tx.ready
+
+  ackReg := io.mem.rd || io.mem.wr
+  io.mem.ack := ackReg
+
+  when (io.mem.rd) {
+    idxReg := idx
+  }
+  rdDlyReg := io.mem.rd
+
+  // Reading the data word pops one item off rx, in the same cycle the master is
+  // handed the value. Reading status or count consumes nothing.
+  io.rx.ready := rdDlyReg && idxReg === data
+  when (io.rx.fire) {
+    rxCountReg := rxCountReg + 1.U
+  }
+
+  io.mem.rdData := 0.U
+  switch (idxReg) {
+    is (status) { io.mem.rdData := statusReg }
+    is (data) { io.mem.rdData := io.rx.bits.asUInt }
+    is (count) { io.mem.rdData := rxCountReg }
+  }
+
+  // Only a write to the data word transmits; a write to the control word stores
+  // the interrupt enables instead.
+  io.tx.bits := io.mem.wrData.asTypeOf(io.tx.bits)
+  io.tx.valid := io.mem.wr && idx === data
+  when (io.mem.wr && idx === status) {
+    ctrlReg := io.mem.wrData
+  }
+
+  // The control bits mask the status bits: bit 0 raises an interrupt when there
+  // is room to send, bit 1 when there is data to read.
+  io.irq := (statusReg & ctrlReg).orR
+}
 ```
 
-Like `CounterDevice`, `MemMappedRV` is accessible with one cycle of latency
-(the minimum under the pipelined handshake): it registers the read address
-(`addrReg`) and delays `ack` by one cycle (`ackReg`).
+`idxReg` is the registered decode: the command is gone by the time the answer is
+due, so the device remembers which word was asked for, and the read mux runs off
+`idxReg` rather than the address. `rdDlyReg` marks "a read happened last cycle",
+and together they make `io.rx.ready` a one-cycle pulse — so reading the data
+word pops exactly one item off the stream while reading status or count consumes
+nothing.
 
-**Simplification:** to keep the example small, a read always returns
-`io.rx.bits` even if the receive channel has no valid data (`rx.valid` false),
-and a write always asserts `tx.valid` even if the send buffer is full — instead
-of stalling `ack` until the channel is actually ready. The example delegates
-that check entirely to software, which is expected to read the status register
-first and only read/write data once TDRE/RDRF say it is safe.
+The write side is qualified the same way: `io.tx.valid := io.mem.wr && idx ===
+data` transmits only for a write to `0x4`, and a write to `0x0` lands in
+`ctrlReg` instead. `io.irq` is then just `(statusReg & ctrlReg).orR` — the
+status bits masked by the enables, which is how a real UART's interrupt line
+works.
 
-`UseMemMappedRV` connects it to a small `RegFifo` (tx → enq, deq → rx) as a
-loopback, so `InterconnectTest` can write a value and read it back through the
-status/data registers.
+Like `CounterDevice`, `MemMappedRV` answers with one cycle of latency, the
+minimum the pipelined handshake allows.
 
-That `RegFifo` is carried over from [Chapter 11](../ch11-example-designs/README.md#112-generalized-fifos-readyvalid--inheritance),
-and `src/main/scala/fifo/fifo.scala` here keeps just the two declarations it
-needs — the port bundle and the abstract base:
+**Simplification:** to keep the example small, a read of the data word always
+returns `io.rx.bits` even if the receive channel has nothing valid, and a write
+to it always asserts `tx.valid` even if the send buffer is full — instead of
+stalling `ack` until the channel is actually ready. The bridge therefore does
+not translate ready/valid backpressure into wait states; it **exposes** it, as
+the status bits. The example delegates that check entirely to software, which is
+expected to read the status register first and only touch the data word once
+TDRE/RDRF say it is safe.
 
-`src/main/scala/fifo/fifo.scala`
+Ignore that discipline and the failures are quiet ones. `tx.ready` here is the
+`Queue`'s enqueue-ready, so it goes low once three words are outstanding; a
+write past that point raises `tx.valid` against a low `ready`, so nothing fires,
+the word is dropped, and the bus transfer is acknowledged anyway. A read of the
+data word while `rx.valid` is low is the mirror image: the master gets whatever
+`rx.bits` happens to hold, and the word count does not advance. Both are
+recoverable by polling — TDRE clears before the drop, and the count reveals the
+stale read — which is exactly why the status register exists.
+
+`UseMemMappedRV` closes the loop so the bridge can be tested on its own — the
+transmit side feeds a three-deep `Queue` whose dequeue side comes back as the
+receive side:
+
+`src/main/scala/soc/MemMappedRV.scala`
 ```scala
-class FifoIO[T <: Data](private val gen: T) extends Bundle {
-  val enq = Flipped(new DecoupledIO(gen))
-  val deq = new DecoupledIO(gen)
-}
+class UseMemMappedRV[T <: Data](gen: T) extends Module {
+  val io = IO(new Bundle() {
+    val mem = new ReqAckIO(4)
+    val irq = Output(Bool())
+  })
 
-abstract class Fifo[T <: Data](gen: T, val depth: Int) extends Module {
-  val io = IO(new FifoIO(gen))
-  require(depth > 0, "Number of buffer elements needs to be larger than 0")
+  val memDevice = Module(new MemMappedRV(gen))
+  memDevice.io.rx <> Queue(memDevice.io.tx, 3)  // three-deep FIFO.
+  io.mem <> memDevice.io.mem
+  io.irq := memDevice.io.irq
 }
 ```
 
-`FifoIO` is a ready/valid port pair — an enqueue side (`Flipped`, so the FIFO
-*receives*) and a dequeue side. `Fifo` is `abstract`: it fixes the interface and
-the `depth` parameter, requires a sensible depth, and leaves the storage to a
-subclass. `RegFifo` is the one implementation kept in this chapter; Chapter 11
-develops four others against the same base. The payoff is exactly what this
-chapter is about — because the buffer is behind a standard interface, the
-memory-mapped device does not care which implementation sits behind it.
+`Queue(memDevice.io.tx, 3)` is the whole loopback: the object-apply form of
+`Queue` takes a `Decoupled` producer, returns the buffered `Decoupled`
+consumer, and instantiates the FIFO in between.
+
+#### Checking it
+
+The test drives the bus exactly as software would: poll the status register,
+then move data. The `read`/`write` helpers are the pipelined-protocol pattern of
+[Section 12.3.2](#1232-the-pipelined-handshake) again, this time on `io.mem`.
+
+`src/test/scala/MemMappedRVTest.scala`
+```scala
+  "MemMappedRV bridge" should "expose status and move data through the FIFO" in {
+    test(new UseMemMappedRV(UInt(16.W))) { dut =>
+      def step(n: Int = 1) = dut.clock.step(n)
+
+      def read(addr: Int) = {
+        dut.io.mem.address.poke(addr.U)
+        dut.io.mem.rd.poke(true.B)
+        step()
+        dut.io.mem.rd.poke(false.B)
+        while (!dut.io.mem.ack.peekBoolean()) step()
+        dut.io.mem.rdData.peekInt()
+      }
+      def write(addr: Int, value: Int) = {
+        dut.io.mem.address.poke(addr.U)
+        dut.io.mem.wrData.poke(value.U)
+        dut.io.mem.wr.poke(true.B)
+        step()
+        dut.io.mem.wr.poke(false.B)
+        while (!dut.io.mem.ack.peekBoolean()) step()
+      }
+
+      step(5)
+      assert(read(status) == 1, "TX flag should be set (FIFO ready)")
+      write(data, 123)                  // transmit -> into the FIFO
+      step(10)
+      assert(read(status) == 3, "TX and RX flags should be set")
+      assert(read(data) == 123, "receive value should match what was sent")
+      assert(read(count) == 1, "one word has been read out of the stream")
+    }
+  }
+```
+
+Each assertion checks one part of the map. After reset the FIFO is empty, so
+TDRE alone is set and the status reads `1` — bit 0 is `tx.ready`. Writing 123 to
+`0x4` pushes a word into the FIFO, and ten cycles later it has come round to the
+dequeue side, so RDRF joins TDRE and the status reads `3`. Reading `0x4` then
+pulls the value back out — the 123 that went in — and `0x8` reports that one
+word has been taken off the stream, which is only true if the read popped it.
+
+The second test is the one the old single-bit design would have failed: a write
+to the control word must not enqueue anything.
+
+```scala
+  it should "not transmit on a write to the control word" in {
+    test(new UseMemMappedRV(UInt(16.W))) { dut =>
+      def step(n: Int = 1) = dut.clock.step(n)
+      def write(addr: Int, value: Int) = {
+        dut.io.mem.address.poke(addr.U)
+        dut.io.mem.wrData.poke(value.U)
+        dut.io.mem.wr.poke(true.B)
+        step()
+        dut.io.mem.wr.poke(false.B)
+        while (!dut.io.mem.ack.peekBoolean()) step()
+      }
+
+      step(5)
+      write(status, 0)                  // control write: must not enqueue
+      step(10)
+      dut.io.mem.address.poke(status.U)
+      dut.io.mem.rd.poke(true.B)
+      step()
+      dut.io.mem.rd.poke(false.B)
+      while (!dut.io.mem.ack.peekBoolean()) step()
+      dut.io.mem.rdData.expect(1.U, "RDRF must still be clear: nothing was sent")
+    }
+  }
+```
+
+The third checks the interrupt line: silent with the mask at zero, still silent
+once "data to read" is enabled but nothing has arrived, and asserted only when
+an enabled condition actually holds.
+
+```scala
+  it should "raise irq only for an enabled condition" in {
+    test(new UseMemMappedRV(UInt(16.W))) { dut =>
+      def step(n: Int = 1) = dut.clock.step(n)
+      def write(addr: Int, value: Int) = {
+        dut.io.mem.address.poke(addr.U)
+        dut.io.mem.wrData.poke(value.U)
+        dut.io.mem.wr.poke(true.B)
+        step()
+        dut.io.mem.wr.poke(false.B)
+        while (!dut.io.mem.ack.peekBoolean()) step()
+      }
+
+      step(5)
+      dut.io.irq.expect(false.B, "no interrupt while the control word is zero")
+
+      write(status, 2)                  // enable the "data to read" interrupt
+      step()
+      dut.io.irq.expect(false.B, "still nothing to read")
+
+      write(data, 55)                   // send one word round the loopback
+      step(10)
+      dut.io.irq.expect(true.B, "RDRF is set and its interrupt is enabled")
+    }
+  }
+```
+
+```
+sbt "testOnly MemMappedRVTest"
+```
+
+```
+[info] MemMappedRVTest:
+[info] MemMappedRV bridge
+[info] - should expose status and move data through the FIFO
+[info] - should not transmit on a write to the control word
+[info] - should raise irq only for an enabled condition
+[info] Run completed in 1 second, 160 milliseconds.
+[info] Total number of tests run: 3
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 3, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
 
 ---
 
 ## 12.5 Bus and interface standards
 
 Several point-to-point and bus standards have been proposed over the years;
-the ready/valid discipline from [Chapter 9](../ch09-communicating-state-machines/README.md)
-underlies most of them.
+the [ready/valid discipline](#readyvalid-the-two-sided-handshake) of Section
+12.4 underlies most of them.
 
-Each standard below picks one of the three schemes from Sections 12.3.1 to 12.3.3
-and layers the ready/valid and tagging of
-[Sections 12.3.5](#1235-readyvalid-the-two-sided-handshake)–[12.3.6](#1236-tagged-completion-answering-out-of-order)
-on top, so it is worth naming them up front. Classic Wishbone is the **combinational**
-handshake, and its synchronous variant is the **registered** one — the two
-Wishbone slaves built here are the same devices as `CounterDeviceComb` and
-`CounterDeviceReg`, wearing Wishbone's signal names. AXI is different in kind:
-its `ready`/`valid` channels fix the "does the initiator hold?" question at
-*yes*, so an AXI channel handshake is registered-style by construction, and what
-varies is how many transactions a slave will accept at once.
+Each standard below picks one of the three schemes from Sections 12.3.1 to
+12.3.3 and layers on the [ready/valid](#readyvalid-the-two-sided-handshake) of
+Section 12.4 and, for full AXI4, the [tagging](APPENDIX-AXI4.md#a4-transaction-ids-and-out-of-order-completion) of the appendix, so it is
+worth naming them up front. Classic Wishbone is the
+**combinational** handshake and its synchronous variant is the **registered**
+one, so the three Wishbone slaves built here are `CounterDeviceComb` at zero and
+at two wait states, and `CounterDeviceReg`, wearing Wishbone's signal names. AXI
+differs in what it fixes: its ready/valid channels settle the "does the
+initiator hold?" question at *yes* — `VALID` may not be withdrawn once raised —
+while leaving each slave free to drive `READY` from a wire or from a flop. Every
+AXI slave in this chapter uses a flop, which is why they measure as
+registered-style; what varies between them is how many transactions they will
+accept at once.
 
 ### Wishbone
 
@@ -1075,11 +1539,14 @@ the classic shared-wire sense), used by several open-source IP cores, but
 still in the spirit of a microcomputer/backplane bus. This is not the best fit
 for an SoC interconnect: Wishbone requires the **master** to hold address and
 data valid for the *entire* read or write cycle. For a master whose data is
-only valid a single cycle (as in the pipelined scheme), that means either registering
-address/data *before* the Wishbone connection — costing an extra cycle of
-latency — or an expensive multiplexer. A better fix is to register the
-address and data **in the slave** instead, so address decoding happens in the
-same cycle the address is registered. The mirror issue applies to the
+only valid a single cycle (as in the pipelined scheme), that means either
+registering address/data *before* the Wishbone connection — costing an extra
+cycle of latency — or a multiplexer that is expensive in both time and
+resources. A better fix is to register the address and data **in the slave**
+instead. That register is free of latency, because the slave decodes the
+incoming address combinationally in the very cycle it captures it: the decode
+and the capture overlap, where a register in front of the interface must
+complete before decoding can start. The mirror issue applies to the
 **slave's** output data: since it is only valid for one cycle, a master that
 doesn't sample it immediately must register it — so, by convention, the slave
 should keep its last valid output held even after the Wishbone strobe
@@ -1100,7 +1567,7 @@ the slave's acknowledgment.
   <img src="figures/wishbone.png" alt="Wishbone asynchronous read followed by an asynchronous write" width="600">
 </p>
 
-***Figure 12.6** — Wishbone asynchronous read followed by an asynchronous
+***Figure 12.7** — Wishbone asynchronous read followed by an asynchronous
 write.*
 
 The read occupies cycle 2 on its own: the master raises `CYC_O` and `STB_O`
@@ -1116,7 +1583,7 @@ price of the combinational path described in
   <img src="figures/wishbone-sync.png" alt="Wishbone synchronous read followed by a synchronous write" width="620">
 </p>
 
-***Figure 12.7** — Wishbone synchronous read followed by a synchronous write.*
+***Figure 12.8** — Wishbone synchronous read followed by a synchronous write.*
 
 With a synchronous (registered) slave the acknowledgment arrives on a clock edge
 instead, so each transfer takes two cycles: the read is requested in cycle 2,
@@ -1216,7 +1683,14 @@ class WishboneCounterWait(val waitStates: Int = 2) extends Module {
   }.otherwise {
     waitReg := 0.U                      // acked this cycle; rearm for the next
   }
-  ...
+
+  for (i <- 0 until 4) {
+    cntRegs(i) := cntRegs(i) + 1.U
+  }
+  // The transfer completes in the ack cycle, so that is when the write lands.
+  when(io.ack && io.we) {
+    cntRegs(idx) := io.datWr
+  }
 }
 ```
 
@@ -1227,7 +1701,7 @@ With `waitStates = 2` this is Figure 12.3 exactly. Set `waitStates = 0` and
   <img src="figures/wishbone-wait.png" alt="Combinational acknowledge with two wait states" width="580">
 </p>
 
-***Figure 12.8** — `WishboneCounterWait(2)`, captured from simulation. Read it
+***Figure 12.9** — `WishboneCounterWait(2)`, captured from simulation. Read it
 against Figure 12.3.*
 
 Every feature of Figure 12.3 is there: the address is valid across cycles
@@ -1273,7 +1747,7 @@ flip-flop. A test pins this down without any clock stepping at all:
       dut.io.ack.expect(true.B, "and comes straight back")
 ```
 
-The synchronous slave of Figure 12.7 differs only in that `ack` and the read
+The synchronous slave of Figure 12.8 differs only in that `ack` and the read
 data are registered:
 
 `src/main/scala/wishbone/Wishbone.scala`
@@ -1291,13 +1765,27 @@ class WishboneCounterSync extends Module {
   val ackReg = RegInit(false.B)
   ackReg := active && !ackReg
   io.ack := ackReg
-  ...
+
+  // Read data is registered alongside the ack, so it is valid in the same cycle
+  // the master samples the ack.
+  val dataReg = RegInit(0.U(32.W))
+  dataReg := cntRegs(idx)
+  io.datRd := dataReg
+
+  for (i <- 0 until 4) {
+    cntRegs(i) := cntRegs(i) + 1.U
+  }
+  // The write lands in the first cycle of the transfer, the ack follows in the
+  // second; `!ackReg` stops the held request from writing twice.
+  when(active && !ackReg && io.we) {
+    cntRegs(idx) := io.datWr
+  }
 }
 ```
 
 That `&& !ackReg` is the part a first attempt usually gets wrong. Because the
 master keeps `CYC_O`/`STB_O` asserted *through* the acknowledgment cycle — look
-again at Figure 12.7, where they span cycles 2 and 3 — a plain `ackReg :=
+again at Figure 12.8, where they span cycles 2 and 3 — a plain `ackReg :=
 active` would see the request still active in cycle 3 and acknowledge it a
 second time in cycle 4.
 
@@ -1324,10 +1812,121 @@ block and read out through a separate `assign`:
 *(Generated blocks here have firtool's `// src/…` source-location comments
 stripped; nothing else is changed.)*
 
-`src/test/scala/WishboneCounterTest.scala` pins the two timings down against
-the figures — it checks `ack` **without stepping the clock** after driving the
-request, which passes only for the asynchronous slave, and checks that the
-synchronous one answers `false` there and `true` one step later.
+#### Checking it
+
+`WishboneCounterTest` drives both slaves with the same master routine and pins
+each one to its figure. The asynchronous slave is checked with no clock step at
+all — the ack has to be there already — and then the request is withdrawn to
+show the ack falling with it:
+
+`src/test/scala/WishboneCounterTest.scala`
+```scala
+  "An asynchronous Wishbone slave" should "acknowledge in the request cycle (Figure 12.7)" in {
+    test(new WishboneCounter()) { dut =>
+      dut.io.sel.poke(15.U)
+      dut.io.adr.poke(0.U)
+      dut.io.we.poke(false.B)
+      dut.io.cyc.poke(true.B)
+      dut.io.stb.poke(true.B)
+
+      // No clock step: the ack is combinational, so it is already there.
+      dut.io.ack.expect(true.B, "an asynchronous slave acks within the request cycle")
+      dut.clock.step()
+
+      dut.io.cyc.poke(false.B)
+      dut.io.stb.poke(false.B)
+      dut.io.ack.expect(false.B, "ack falls with the request")
+    }
+  }
+```
+
+The synchronous slave is the same request, checked the other way round: `false`
+in the request cycle, because a flop cannot answer before an edge, and `true`
+after one step.
+
+```scala
+  "A synchronous Wishbone slave" should "acknowledge one cycle later (Figure 12.8)" in {
+    test(new WishboneCounterSync()) { dut =>
+      dut.io.sel.poke(15.U)
+      dut.io.adr.poke(0.U)
+      dut.io.we.poke(false.B)
+      dut.io.cyc.poke(true.B)
+      dut.io.stb.poke(true.B)
+
+      dut.io.ack.expect(false.B, "a registered slave cannot ack in the request cycle")
+      dut.clock.step()
+      dut.io.ack.expect(true.B, "the ack arrives on the next clock edge")
+
+      dut.clock.step()
+      dut.io.cyc.poke(false.B)
+      dut.io.stb.poke(false.B)
+    }
+  }
+```
+
+The third test uses a latency-agnostic master — poll `ACK_I`, then release
+`CYC_O`/`STB_O` — so one routine works against either slave, and the cycles it
+spends waiting are what separate the two figures. Writing 1000 into counter 1
+and reading it back returns just over 1000, since the counter free-runs while
+the read is in flight:
+
+```scala
+  it should "load and read back a counter" in {
+    test(new WishboneCounterSync()) { dut =>
+      write(dut, 4, 1000)                 // byte address 4 -> counter 1
+      val (value, cycles) = read(dut, 4)
+      assert(cycles == 1, "a registered slave takes one extra cycle")
+      // The counters free-run, so the value has advanced by the handful of
+      // cycles the read itself took.
+      assert(value >= 1000 && value < 1010, s"expected just over 1000, got $value")
+    }
+  }
+```
+
+```
+sbt "testOnly WishboneCounterTest"
+```
+
+```
+[info] WishboneCounterTest:
+[info] An asynchronous Wishbone slave
+[info] - should acknowledge in the request cycle (Figure 12.7)
+[info] A synchronous Wishbone slave
+[info] - should acknowledge one cycle later (Figure 12.8)
+[info] - should load and read back a counter
+[info] Run completed in 1 second, 96 milliseconds.
+[info] Total number of tests run: 3
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 3, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+The throughput side is measured in `HandshakeStylesTest`, which counts acks over
+a fixed window for the wait-state slave (one transfer per three cycles) and the
+synchronous one (one per two) — the Wishbone numbers in the recap table:
+
+```
+sbt 'testOnly HandshakeStylesTest -- -z "slave"'
+```
+
+```
+[info] HandshakeStylesTest:
+[info] A combinational slave with wait states
+[info] - should hold ack low until its access time has passed (Figure 12.3)
+[info] - should drive ack combinationally, not from a register
+[info] - should complete one transaction every three cycles
+[info] A registered slave
+[info] - should complete one transaction every two cycles
+[info] An AXI4-Lite slave
+[info] - should also manage only one transfer every two cycles
+[info] A full AXI4 memory
+[info] An out-of-order AXI4 memory
+[info] Run completed in 1 second, 296 milliseconds.
+[info] Total number of tests run: 5
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 5, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
 
 #### The cost of putting Wishbone under a pipelined master
 
@@ -1338,6 +1937,31 @@ latency" — is a claim about cycle counts. A bridge makes it measurable.
 
 `src/main/scala/wishbone/ReqAckToWishbone.scala`
 ```scala
+class ReqAckToWishbone(addrWidth: Int) extends Module {
+  val io = IO(new Bundle {
+    val mem = new ReqAckIO(addrWidth)        // slave side, faces the processor
+    val wb = new WishboneIO(addrWidth)      // master side, faces the device
+  })
+
+  val idle :: transfer :: respond :: Nil = Enum(3)
+  val state = RegInit(idle)
+
+  val addrReg = RegInit(0.U(addrWidth.W))
+  val dataReg = RegInit(0.U(32.W))
+  val selReg = RegInit(0.U(4.W))
+  val weReg = RegInit(false.B)
+  val rdDataReg = RegInit(0.U(32.W))
+
+  io.wb.adr := addrReg
+  io.wb.datWr := dataReg
+  io.wb.sel := selReg
+  io.wb.we := weReg
+  io.wb.cyc := state === transfer
+  io.wb.stb := state === transfer
+
+  io.mem.rdData := rdDataReg
+  io.mem.ack := false.B
+
   switch(state) {
     is(idle) {
       when(io.mem.rd || io.mem.wr) {
@@ -1363,12 +1987,38 @@ latency" — is a claim about cycle counts. A bridge makes it measurable.
       state := idle
     }
   }
+}
 ```
 
+The three states are the whole argument. `idle` captures the single-cycle
+command into `addrReg`/`dataReg`/`selReg`/`weReg` — the registers Wishbone
+forces on a pipelined master. `transfer` drives `CYC_O`/`STB_O` and holds
+everything steady until `ACK_I`. `respond` exists purely so the upstream `ack`
+comes out of a flop: returning it straight from `transfer` would rebuild the
+combinational path the pipelined scheme was chosen to avoid, and `rdDataReg`
+would not be valid yet in any case.
+
 `BridgedWishboneCounter` wires that bridge to `WishboneCounter`, giving a module
-with the same `ReqAckIO(4)` port as the native `CounterDevice` — so the same
-testbench routine can drive both and count the cycles between command and
-`ack`:
+with the same `ReqAckIO(4)` port as the native `CounterDevice` — so one
+testbench routine can drive both and count the cycles between command and `ack`:
+
+`src/main/scala/wishbone/ReqAckToWishbone.scala`
+```scala
+class BridgedWishboneCounter extends Module {
+  val io = IO(new ReqAckIO(4))
+
+  val bridge = Module(new ReqAckToWishbone(4))
+  val device = Module(new WishboneCounter())
+
+  bridge.io.wb <> device.io
+  io <> bridge.io.mem
+}
+```
+
+#### Checking it
+
+The claim under test is a cycle count, so the test measures both paths with the
+same routine and compares them to each other rather than to a constant:
 
 `src/test/scala/ReqAckToWishboneTest.scala`
 ```scala
@@ -1389,11 +2039,40 @@ testbench routine can drive both and count the cycles between command and
   }
 ```
 
-It passes: 1 cycle native, 2 through the bridge. The bridge also gives up
-the pipelined scheme's back-to-back requests, since classic Wishbone has no
-pipelining and
-only one transfer can be in flight — the second cost of the mismatch, and the
-reason the chapter prefers registering address and data *in the slave*.
+The second test then checks that the extra cycle is the *only* difference — the
+bridge still writes and reads the counters correctly:
+
+```scala
+  it should "still move data correctly" in {
+    test(new BridgedWishboneCounter()) { dut =>
+      write(dut.io, dut.clock, 8, 2000)   // byte address 8 -> counter 2
+      val (value, _) = readLatency(dut.io, dut.clock, 8)
+      // Free-running counters again: the value has ticked on a few cycles.
+      assert(value >= 2000 && value < 2010, s"expected just over 2000, got $value")
+    }
+  }
+```
+
+```
+sbt "testOnly ReqAckToWishboneTest"
+```
+
+```
+[info] ReqAckToWishboneTest:
+[info] The Wishbone bridge
+[info] - should cost exactly one extra cycle of latency
+[info] - should still move data correctly
+[info] Run completed in 1 second, 163 milliseconds.
+[info] Total number of tests run: 2
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 2, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+One cycle native, two through the bridge. The bridge also gives up the pipelined
+scheme's back-to-back requests, since classic Wishbone has no pipelining and only
+one transfer can be in flight — the second cost of the mismatch, and the reason
+the chapter prefers registering address and data *in the slave*.
 
 ### AXI
 
@@ -1420,13 +2099,15 @@ order.
 #### AXI4-Lite in Chisel
 
 **AXI4-Lite** is the subset of AXI4 with no bursts and no transaction IDs: one
-data beat per address, one transaction at a time. It keeps all five channels,
+data beat per address, and — with no ids to tell responses apart — no way to
+reorder them. `AxiLiteCounter` below goes one step further and keeps a single
+transaction in flight. AXI4-Lite keeps all five channels,
 so it is enough to show what the two claims above actually mean in hardware.
 (The full protocol — bursts, IDs, out-of-order completion — is built and tested
 in [the AXI4 appendix](APPENDIX-AXI4.md).)
 
 Each channel is a plain `Decoupled`, which is why the ready/valid discipline
-from [Chapter 9](../ch09-communicating-state-machines/README.md) is the whole
+of [Section 12.4](#readyvalid-the-two-sided-handshake) is the whole
 foundation of AXI rather than an analogy for it:
 
 `src/main/scala/axilite/AxiLite.scala`
@@ -1450,7 +2131,7 @@ A read uses two of the five channels and shows the handshake at its simplest:
   <img src="figures/axilite-read.png" alt="AXI4-Lite read transaction" width="620">
 </p>
 
-***Figure 12.9** — An AXI4-Lite read, captured from `AxiLiteCounter`. Grey marks
+***Figure 12.10** — An AXI4-Lite read, captured from `AxiLiteCounter`. Grey marks
 a don't-care: a channel's payload is only meaningful while its `VALID` is
 asserted.*
 
@@ -1474,6 +2155,21 @@ in:
 
 `src/main/scala/axilite/AxiLite.scala`
 ```scala
+class AxiLiteCounter extends Module {
+  val io = IO(Flipped(new AxiLiteIO(4)))
+
+  val cntRegs = RegInit(VecInit(Seq.fill(4)(0.U(32.W))))
+  for (i <- 0 until 4) {
+    cntRegs(i) := cntRegs(i) + 1.U
+  }
+
+  // --- write address and write data, captured independently ---------------
+  val awIdxReg = RegInit(0.U(2.W))
+  val awFullReg = RegInit(false.B)
+  val wDataReg = RegInit(0.U(32.W))
+  val wFullReg = RegInit(false.B)
+  val bValidReg = RegInit(false.B)
+
   io.aw.ready := !awFullReg             // room for one address
   io.w.ready := !wFullReg               // room for one data beat
 
@@ -1494,6 +2190,32 @@ in:
     wFullReg := false.B
     bValidReg := true.B
   }
+  when(io.b.fire) {
+    bValidReg := false.B
+  }
+
+  io.b.valid := bValidReg
+  io.b.bits.resp := AxiResp.okay
+
+  // --- read ---------------------------------------------------------------
+  // One outstanding read: the address is accepted, the counter sampled into a
+  // register, and the data offered on R until the master takes it.
+  val rDataReg = RegInit(0.U(32.W))
+  val rValidReg = RegInit(false.B)
+
+  io.ar.ready := !rValidReg
+  when(io.ar.fire) {
+    rDataReg := cntRegs(io.ar.bits.addr(3, 2))
+    rValidReg := true.B
+  }
+  when(io.r.fire) {
+    rValidReg := false.B
+  }
+
+  io.r.valid := rValidReg
+  io.r.bits.data := rDataReg
+  io.r.bits.resp := AxiResp.okay
+}
 ```
 
 `fire` is `valid && ready` — the cycle a transfer actually happens. Note that
@@ -1506,33 +2228,50 @@ Both orders, captured from the same slave:
   <img src="figures/axilite-write-aw-first.png" alt="AXI4-Lite write, address channel first" width="640">
 </p>
 
-***Figure 12.10** — A write with the address first: `AWADDR` in cycle 2, `WDATA`
+***Figure 12.11** — A write with the address first: `AWADDR` in cycle 2, `WDATA`
 in cycle 3, response in cycle 5.*
 
 <p align="center">
   <img src="figures/axilite-write-w-first.png" alt="AXI4-Lite write, data channel first" width="660">
 </p>
 
-***Figure 12.11** — The same write with the data first: `WDATA` in cycle 2,
+***Figure 12.12** — The same write with the data first: `WDATA` in cycle 2,
 `AWADDR` only in cycle 4, response in cycle 6.*
 
 Read the two together and the holding registers become visible as behaviour.
-In Figure 12.11 the data beat is taken in cycle 2 and then `WREADY` goes low —
+In Figure 12.12 the data beat is taken in cycle 2 and then `WREADY` goes low —
 the slave's one data slot is full. For the next two cycles it has a data beat
 and nowhere to put it, and crucially `BVALID` stays low: it does **not**
 acknowledge a write it cannot yet perform. Only when `AWADDR` arrives in cycle
 4 do both halves exist; cycle 5 shows `AWREADY` and `WREADY` both low while the
 write happens, and the response follows in cycle 6.
 
-Figure 12.10 is the same transaction with the channels swapped, and the slave
+Figure 12.11 is the same transaction with the channels swapped, and the slave
 behaves symmetrically — `AWREADY` drops after cycle 2 instead. Neither ordering
 is privileged, which is precisely the property the ids-free, two-channel write
 path buys and the reason a slave cannot be written as "wait for AW, then read
 W": a master presenting data first would deadlock against it.
 
-The test drives the same write twice, once each way round:
+#### Checking it
+
+The three tests are the three orderings that matter. The first sends AW then W,
+the second sends W then AW, and both must produce exactly one response:
 
 `src/test/scala/AxiLiteCounterTest.scala`
+```scala
+  "An AXI4-Lite slave" should "accept a write with the address first" in {
+    test(new AxiLiteCounter()) { dut =>
+      sendAddr(dut.io.aw, dut.clock, 0)
+      sendData(dut.io.w, dut.clock, 1000)
+
+      dut.io.b.ready.poke(true.B)
+      while (!dut.io.b.valid.peekBoolean()) dut.clock.step()
+      dut.io.b.bits.resp.expect(AxiResp.okay)
+      dut.clock.step()
+    }
+  }
+```
+
 ```scala
   it should "accept the same write with the data first" in {
     test(new AxiLiteCounter()) { dut =>
@@ -1550,9 +2289,55 @@ The test drives the same write twice, once each way round:
   }
 ```
 
-The `expect(false.B)` in the middle is the part that matters: it pins down that
-the slave holds the data and stays silent rather than acknowledging a write it
-has no address for yet.
+The `expect(false.B)` in the middle of the second test is the part that matters:
+it pins down that the slave parks the data beat and stays silent rather than
+acknowledging a write it has no address for yet. Without the holding registers
+this is where a "wait for AW, then read W" slave would deadlock.
+
+The third test closes the loop over the other two channels, AR and R, and uses
+the free-running counters to prove the write landed where it was addressed:
+
+```scala
+  it should "read back what was written" in {
+    test(new AxiLiteCounter()) { dut =>
+      sendAddr(dut.io.aw, dut.clock, 8)   // byte address 8 -> counter 2
+      sendData(dut.io.w, dut.clock, 3000)
+      dut.io.b.ready.poke(true.B)
+      while (!dut.io.b.valid.peekBoolean()) dut.clock.step()
+      dut.clock.step()
+
+      sendAddr(dut.io.ar, dut.clock, 8)
+      dut.io.r.ready.poke(true.B)
+      while (!dut.io.r.valid.peekBoolean()) dut.clock.step()
+      val value = dut.io.r.bits.data.peekInt()
+      dut.io.r.bits.resp.expect(AxiResp.okay)
+      dut.clock.step()
+
+      // Free-running counters: a few cycles have passed since the write.
+      assert(value >= 3000 && value < 3010, s"expected just over 3000, got $value")
+    }
+  }
+```
+
+```
+sbt "testOnly AxiLiteCounterTest"
+```
+
+```
+[info] AxiLiteCounterTest:
+[info] An AXI4-Lite slave
+[info] - should accept a write with the address first
+[info] - should accept the same write with the data first
+[info] - should read back what was written
+[info] Run completed in 1 second, 168 milliseconds.
+[info] Total number of tests run: 3
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 3, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+Its throughput — one transfer per two cycles, the registered rate — is measured
+in `HandshakeStylesTest` alongside the Wishbone slaves, in the run shown above.
 
 ### Open Core Protocol
 
@@ -1587,13 +2372,13 @@ its data bus to zero; Xilinx has since moved all its interconnects to AXI.
 $ sbt test
 ```
 
-Expected tail (30 tests across 8 suites):
+Expected tail (32 tests across 8 suites):
 
 ```
-[info] Run completed in 3 seconds, 75 milliseconds.
-[info] Total number of tests run: 30
+[info] Run completed in 1 second, 972 milliseconds.
+[info] Total number of tests run: 32
 [info] Suites: completed 8, aborted 0
-[info] Tests: succeeded 30, failed 0, canceled 0, ignored 0, pending 0
+[info] Tests: succeeded 32, failed 0, canceled 0, ignored 0, pending 0
 [info] All tests passed.
 ```
 
@@ -1612,9 +2397,9 @@ emits twelve files into `generated/`:
 | `CounterDeviceReg.sv` | the four counters, registered ack (Section 12.3.3) |
 | `CounterDevice.sv` | the four counters, pipelined handshake (Section 12.3.2) |
 | `UseMemMappedRV.sv` | the memory-mapped ready/valid bridge (Section 12.4) |
-| `WishboneCounter.sv` | the same counters, asynchronous Wishbone slave (Figure 12.6) |
-| `WishboneCounterWait.sv` | the Wishbone equivalent of `CounterDeviceComb` (Figure 12.8) |
-| `WishboneCounterSync.sv` | the same counters, synchronous Wishbone slave (Figure 12.7) |
+| `WishboneCounter.sv` | the same counters, asynchronous Wishbone slave (Figure 12.7) |
+| `WishboneCounterWait.sv` | the Wishbone equivalent of `CounterDeviceComb` (Figure 12.9) |
+| `WishboneCounterSync.sv` | the same counters, synchronous Wishbone slave (Figure 12.8) |
 | `AxiLiteCounter.sv` | the same counters, AXI4-Lite slave |
 | `BridgedWishboneCounter.sv` | `WishboneCounter` reached through the bridge |
 | `Axi4Memory.sv` | burst-capable AXI4 memory ([appendix](APPENDIX-AXI4.md)) |
@@ -1640,17 +2425,18 @@ emitted separately.
   is half a fix. **Pipelined** = flop, released after one cycle: the only one
   that reaches back-to-back requests, at the cost of tracking which command an
   ack belongs to. Measured at 1 transfer per 3, per 2, and per cycle.
-- **Two further schemes**, both built elsewhere in the chapter and both
-  answering questions `ack` cannot. **Ready/valid** makes stalling symmetric —
-  the receiver can refuse a transfer, which req/ack has no wire for — and is
-  per-channel flow control rather than a transaction, so AXI needs five channels
-  and a state machine to rebuild one transaction from it. **Tagged completion**
-  puts an id on the command and the same id on the response, which removes the
-  in-order requirement the pipelined scheme imposes and with it head-of-line
-  blocking; `Axi4OooReadMemory` answers the later request first. Credit-based
-  flow control, clockless 2-/4-phase handshakes, clock-domain crossings, and
-  retry/split responses are named in
-  [Section 12.3.7](#1237-handshakes-this-chapter-does-not-build) but not built.
+- **Two further schemes**, each introduced where its hardware lives.
+  **Ready/valid** ([Section 12.4](#readyvalid-the-two-sided-handshake)) makes
+  stalling symmetric — the receiver can refuse a transfer, which req/ack has no
+  wire for — and is per-channel flow control rather than a transaction, so AXI
+  needs five channels and a state machine to rebuild one transaction from it.
+  **Tagged completion** ([the appendix](APPENDIX-AXI4.md#a4-transaction-ids-and-out-of-order-completion)) puts an id on the command and the
+  same id on the response, removing the in-order requirement the pipelined
+  scheme imposes and with it head-of-line blocking. Credit-based flow control,
+  clockless 2-/4-phase handshakes, clock-domain crossings, and retry/split
+  responses are named in
+  [Section 12.3.5](#1235-handshakes-this-chapter-does-not-build) but not
+  built.
 - The pipelined scheme generalizes to point-to-point links through a switching
   fabric, with arbitration once there is more than one master; Patmos/OCP and
   `t-crest/soc-comm` use exactly this shape.
@@ -1690,7 +2476,9 @@ included, each classified by its actual driver expression:
 | `Axi4Memory`, inside a burst | as above | flop (FSM) | yes | burst amortisation | ~1 beat / cycle ✔ |
 | `Axi4OooReadMemory` | `hasFree` (from `busyRegs`) | flop | yes | 2 outstanding, out-of-order | 1 / 2 cycles ✔ |
 
-✔ measured by `src/test/scala/HandshakeStylesTest.scala`; the rest follow by
+✔ measured by `src/test/scala/CounterDeviceTest.scala` (the three `ReqAckIO`
+schemes) and `src/test/scala/HandshakeStylesTest.scala` (the protocol slaves);
+the rest follow by
 inspection.
 
 Three things the table makes visible that the individual sections do not:
