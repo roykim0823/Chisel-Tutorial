@@ -125,6 +125,31 @@ class MinTuple(n: Int, w: Int) extends Module {
   io.idx := resFun._2
 }
 
+// A control experiment for Section 10.6.1: variant (b)'s Bundle, unchanged,
+// with only the fold swapped from reduceTree to reduce. It shows that the
+// chain shape of variant (c) comes from the fold, not from the tuple.
+class MinBundleReduce(n: Int, w: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Input(Vec(n, UInt(w.W)))
+    val min = Output(UInt(w.W))
+    val idx = Output(UInt(8.W))
+  })
+
+  class Two extends Bundle {
+    val v = UInt(w.W)
+    val idx = UInt(8.W)
+  }
+  val vecTwo = Wire(Vec(n, new Two()))
+  for (i <- 0 until n) {
+    vecTwo(i).v := io.in(i)
+    vecTwo(i).idx := i.U
+  }
+  val res = vecTwo.reduce((x, y) => Mux(x.v < y.v, x, y))   // reduce, not reduceTree
+
+  io.min := res.v
+  io.idx := res.idx
+}
+
 // (d) value AND index, using a MixedVec + reduceTree.
 class MinMixedVec(n: Int, w: Int) extends Module {
   val io = IO(new Bundle {
@@ -185,4 +210,18 @@ object FunctionalMinDemo extends App {
 
   println("=== summary ===")
   for ((name, gen) <- variants) println(f"${name.take(20)}%-22s ${metrics(verilog(gen))}")
+}
+
+// Print the control experiment's SystemVerilog on its own, the same way
+// FunctionalMinDemo prints the four variants.
+// Run with:  sbt "runMain FunctionalMinControl"
+object FunctionalMinControl extends App {
+  val sv = ChiselStage
+    .emitSystemVerilog(new MinBundleReduce(4, 8), firtoolOpts = Array("-strip-debug-info"))
+    .linesIterator
+    .dropWhile(!_.startsWith("module"))
+    .mkString("\n")
+
+  println("--- (control) MinBundleReduce   Bundle + reduce ---")
+  println(sv)
 }

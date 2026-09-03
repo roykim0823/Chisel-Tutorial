@@ -279,6 +279,7 @@ multi-clock *memory* specifically, the rule is: define the memory itself
 **outside** any `withClock` block, and wrap **each port's** access logic in
 its own `withClock` block, so port `i` is clocked by its own `io.ps(i).clk`:
 
+`src/main/scala/MultiClockMemory.scala`
 ```scala
 class MemoryIO(val n: Int, val w: Int) extends Bundle {
   val clk   = Input(Bool())
@@ -298,12 +299,15 @@ class MultiClockMemory(ports: Int, n: Int = 1024, w: Int = 32) extends Module {
 
   for (i <- 0 until ports) {
     val p = io.ps(i)
-    withClock(p.clk.asClock) {          // this port's own withClock block
+    val clk = p.clk.asClock
+    withClock(clk) {                    // this port's own withClock block
       val datao = WireDefault(0.U(w.W))
       when(p.en) {
-        datao := ram(p.addr)
+        // Chisel 6 wants the port's clock passed explicitly - see the note in
+        // the chapter README; ram(p.addr) alone is deprecated here.
+        datao := ram.read(p.addr, clk)
         when(p.we) {
-          ram(p.addr) := p.datai
+          ram.write(p.addr, p.datai, clk)
         }
       }
       p.datao := datao
@@ -311,8 +315,21 @@ class MultiClockMemory(ports: Int, n: Int = 1024, w: Int = 32) extends Module {
   }
 }
 ```
-*illustrative — not part of this chapter's `src/`; adapted from the book's
-`MultiClockMemory.scala`.*
+
+> **Chisel 6 changed this.** Writing the port access as plain `ram(p.addr)` /
+> `ram(p.addr) := p.datai` inside a `withClock` block — the way the book spells
+> it — still elaborates, but Chisel 6 deprecates it, because the memory was
+> created under the module's implicit clock while the port is being created
+> under a different one:
+>
+> ```
+> [deprecated] @[src/main/scala/MultiClockMemory.scala 28:21] (2 calls): The clock used to initialize the memory is different than the one used to initialize the port. If this is intentional, please pass the clock explicitly when creating the port. This behavior will be an error in 3.6.0
+> ```
+>
+> Doing what the message asks — passing the port's clock to `ram.read` and
+> `ram.write` — is exactly the intent here (each port *is* meant to run on its
+> own clock), and it silences the warning. That is why the file above uses the
+> explicit-clock accessors.
 
 Multi-clock memories bring their own constraints: two (or more) ports must
 never write the **same address on the same cycle** — doing so risks
@@ -345,8 +362,9 @@ Generate SystemVerilog:
 $ sbt "runMain Generate"
 ```
 
-emits into `generated/`: the custom-interface `BubbleFifo.sv`, and the three
-UART tops `Sender.sv`, `Echo.sv`, and `UartLoopback.sv`.
+emits into `generated/`: the custom-interface `BubbleFifo.sv`, the three
+UART tops `Sender.sv`, `Echo.sv`, and `UartLoopback.sv`, and the two-port
+`MultiClockMemory.sv` from [§11.4](#114-a-multi-clock-memory).
 
 **All five** ready/valid FIFOs of [§11.2](#112-generalized-fifos-readyvalid--inheritance)
 go into `generated/fifo/` — `BubbleFifo.sv`, `DoubleBufferFifo.sv`,

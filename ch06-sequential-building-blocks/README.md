@@ -72,11 +72,11 @@ val bothReg = RegNext(d, 0.U) // ... with a reset value
 A register can also be defined and connected in two steps **without** an
 initial value — plain `Reg`, not `RegInit`:
 
+`src/main/scala/Registers.scala`
 ```scala
 val delayReg = Reg(UInt(4.W))
 delayReg := delayIn
 ```
-*illustrative*
 
 First the register is declared and named (the `Reg` in the name is a common
 convention that flags it as state, not a combinational wire); second, the
@@ -127,34 +127,39 @@ when `enable` is high, otherwise hold. It's a mux that feeds the output back:
 back, so the value is held.* Chisel spells this `RegEnable(d, enable)` (or a
 `when(enable){ reg := d }`), described here in full:
 
+`src/main/scala/Registers.scala`
 ```scala
 val enableReg = Reg(UInt(4.W))
-when (enable) {
+when(enable) {
   enableReg := inVal
 }
 ```
-*illustrative*
 
 Because this pattern is so common, Chisel provides `RegEnable`, whose second
-parameter is the enable signal — `val enableReg2 = RegEnable(inVal, enable)` —
-equivalent to the `when` above. A register with an enable can also be reset,
+parameter is the enable signal, equivalent to the `when` above:
+
+`src/main/scala/Registers.scala`
+```scala
+val enableReg2 = RegEnable(inVal, enable)
+```
+ A register with an enable can also be reset,
 combining `RegInit` with the same `when`:
 
+`src/main/scala/Registers.scala`
 ```scala
 val resetEnableReg = RegInit(0.U(4.W))
-when (enable) {
+when(enable) {
   resetEnableReg := inVal
 }
 ```
-*illustrative*
 
 The same reset-and-enable behavior is available in one line with the
 **three-parameter** form of `RegEnable` — input, init value, enable:
 
+`src/main/scala/Registers.scala`
 ```scala
 val resetEnableReg2 = RegEnable(inVal, 0.U(4.W), enable)
 ```
-*illustrative*
 
 Just like synchronous reset, an enable is built into modern FPGA flip-flops,
 so an enabled register also costs no extra LUTs.
@@ -177,10 +182,10 @@ A register can also be used **anonymously**, inline in an expression, with no
 name of its own. The following circuit detects a **rising edge** by comparing
 a signal's current value with its value one cycle ago:
 
+`src/main/scala/Registers.scala`
 ```scala
 val risingEdge = din & !RegNext(din)
 ```
-*illustrative*
 
 `risingEdge` is `true` for exactly one cycle: the first cycle in which `din`
 reads high right after having been low.
@@ -554,13 +559,13 @@ this.
 $ sbt test
 ```
 
-Expected tail (15 tests across 6 suites):
+Expected tail (17 tests across 6 suites):
 
 ```
-[info] Run completed in 1 second, 447 milliseconds.
-[info] Total number of tests run: 15
+[info] Run completed in 1 second, 572 milliseconds.
+[info] Total number of tests run: 17
 [info] Suites: completed 6, aborted 0
-[info] Tests: succeeded 15, failed 0, canceled 0, ignored 0, pending 0
+[info] Tests: succeeded 17, failed 0, canceled 0, ignored 0, pending 0
 [info] All tests passed.
 ```
 

@@ -2,7 +2,8 @@
 
 Chapter 3 introduced ChiselTest; this chapter digs deeper into how to **debug**,
 **test**, and **verify** hardware. It covers waveform/printf debugging, making
-tests readable with helper functions, selecting tests with **tags**, reaching
+tests readable with helper functions, selecting tests with **tags** and the
+other test filters, reaching
 **internal signals** with `BoringUtils`, **multithreaded** tests, simulator
 **backends**, and finally **assertions** and **formal verification**.
 
@@ -228,7 +229,7 @@ while Listing 13.2 fails:
 [info]   0 was not greater than 100 counter 3 advanced (CounterDeviceTest.scala:61)
 ```
 
-### 13.2.2 Selecting tests with tags
+### 13.2.2 Selecting tests with tags — and the other filters
 
 With a large test suite you may want to run only a subset — for example as part
 of a continuous-integration run. The easiest way to do that while still running
@@ -275,6 +276,197 @@ skipped. Across the whole chapter the other two suites keep running, so
 If your tests (and tags) live inside a package, remember to give the **full
 reference path** to both the test and the tag — a bare class/tag name won't
 resolve.
+
+**Tags are one filter of several.** A tag is the right tool when the *set* of
+tests you want to skip is a property of the tests themselves (slow, flaky,
+unnecessary in CI). For the everyday "just run this one thing" case there are
+four more axes, and the `--` in the command line is the seam between the two
+tools that provide them:
+
+```
+sbt 'testOnly TagTest -- -l Unnecessary'
+     ^^^^^^^^ ^^^^^^^    ^^^^^^^^^^^^^^
+     sbt task  which      handed verbatim to the ScalaTest Runner,
+               suites     which picks tests *inside* those suites
+```
+
+`testOnly` is sbt's, and it only ever selects whole **suites**. Everything after
+`--` goes to ScalaTest — and to chiseltest, which is how the `-DwriteVcd=1` form
+from [§3.2.3](../ch03-build-and-testing/README.md#323-waveforms) reaches it.
+
+**Filtering by test name — `-z` and `-t`.** `-z <substring>` runs every test
+whose **full name** contains the substring. For an `AnyFlatSpec` the full name is
+the subject line plus the clause, so `AssertTest`'s single test is named
+`Assert should hold (even across an overflowing add)`, and any fragment of that
+selects it — across all three suites of this chapter at once:
+
+```
+$ sbt 'testOnly * -- -z "overflowing"'
+[info] BoringTest:
+[info] Boring
+[info] TagTest:
+[info] Integers
+[info] AssertTest:
+[info] Assert
+[info] - should hold (even across an overflowing add)
+[info] Run completed in 956 milliseconds.
+[info] Total number of tests run: 1
+[info] Suites: completed 3, aborted 0
+[info] Tests: succeeded 1, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+Note the same effect as with `-l`: all three suites are loaded and print their
+subject lines, and only the matching test runs.
+
+`-z` may be repeated, and the matches are OR'd together:
+
+```
+$ sbt 'testOnly * -- -z "add" -z "Boring"'
+[info] BoringTest:
+[info] Boring
+[info] - should expose the internal counter
+[info] TagTest:
+[info] Integers
+[info] - should add
+[info] AssertTest:
+[info] Assert
+[info] - should hold (even across an overflowing add)
+[info] Total number of tests run: 3
+```
+
+`-t <name>` is the exact-match sibling: it runs the one test with precisely that
+name, so you must give the whole thing, subject included.
+
+```
+$ sbt 'testOnly AssertTest -- -t "Assert should hold (even across an overflowing add)"'
+[info] AssertTest:
+[info] Assert
+[info] - should hold (even across an overflowing add)
+[info] Total number of tests run: 1
+```
+
+`-z` is the one you reach for in practice, and it is what
+[Chapter 12](../ch12-interconnect/README.md#1231-the-combinational-handshake) uses
+to run one handshake style at a time out of `CounterDeviceTest`, a single suite
+that describes the combinational, registered, and pipelined slaves together —
+`sbt 'testOnly CounterDeviceTest -- -z "combinational"'`.
+
+**Filtering by package — `-m` and `-w`.** When suites live in a package
+(ch11's `fifo` and `uart`, ch14's `leros`, ch15's `wildcat`), `-m <package>`
+restricts the run to that package's own members, while `-w <package>` does the
+same and also descends into subpackages. None of the tutorial's test packages
+are nested, so here the two are interchangeable — `-w uart` in ch11 selects
+`UartTest`, and `-m fifo` selects `FifoTest`:
+
+```
+$ cd ../ch11-example-designs && sbt 'testOnly * -- -m fifo'
+[info] FifoTest:
+[info] BubbleFifo
+[info] - should pass
+[info] DoubleBufferFifo
+[info] - should pass
+[info] MemFifo
+[info] - should pass
+[info] RegFifo
+[info] - should pass
+[info] Total number of tests run: 4
+[info] Suites: completed 1, aborted 0
+```
+
+Naming the suite on the sbt side does the same job — `sbt "testOnly fifo.FifoTest"`
+— which is usually clearer for a single suite; `-m`/`-w` earn their keep when a
+package holds many.
+
+**The sbt side: choosing suites.** These need no `--` at all.
+
+| Command | Runs |
+|---------|------|
+| `sbt test` | every suite in the project |
+| `sbt "testOnly AssertTest"` | one suite |
+| `sbt "testOnly TagTest AssertTest"` | several suites, space-separated |
+| `sbt "testOnly *Assert*"` | glob over the **fully-qualified** suite name |
+| `sbt "testOnly fifo.FifoTest"` | a suite inside a package (full path, as above) |
+| `sbt testQuick` | only suites that failed, never ran, or whose dependencies recompiled |
+| `sbt "Test/testOnly …"` | the same, with the config scope spelled out — `testOnly` already defaults to `Test` |
+
+The glob matches the qualified name, which is why `*Assert*` works and why a
+packaged suite needs either its package or a leading `*`:
+
+```
+$ sbt 'testOnly *Assert*'
+[info] AssertTest:
+[info] Assert
+[info] - should hold (even across an overflowing add)
+[info] Total number of tests run: 1
+```
+
+`testQuick` is the incremental form — after a green run it has nothing left to do:
+
+```
+$ sbt testQuick
+[info] Passed: Total 0, Failed 0, Errors 0, Passed 0
+[info] No tests to run for Test / testQuick
+```
+
+**One more that is not a filter but pairs with them:** `-oD` appends each test's
+duration, which is how you find the slow ones worth tagging.
+
+```
+$ sbt 'testOnly AssertTest -- -oD -z "overflowing"'
+[info] AssertTest:
+[info] Assert
+[info] - should hold (even across an overflowing add) (557 milliseconds)
+```
+
+**Three things to watch out for.**
+
+*A filter that matches nothing is a silent success.* Neither sbt nor ScalaTest
+treats "you selected zero tests" as an error, so a typo looks like a pass. Both
+of these exit `[success]`:
+
+```
+$ sbt 'testOnly AssertTest -- -t "no such test"'
+[info] AssertTest:
+[info] Assert
+[info] Run completed in 51 milliseconds.
+[info] Total number of tests run: 0
+[info] No tests were executed.
+[success] Total time: 0 s
+```
+
+```
+$ sbt "testOnly NoSuchTest"
+[info] Passed: Total 0, Failed 0, Errors 0, Passed 0
+[info] No tests to run for Test / testOnly
+[success] Total time: 0 s
+```
+
+Always read the `Total number of tests run: N` line rather than trusting the
+green `[success]`.
+
+*Quoting.* The whole sbt command has to arrive as a single shell argument, so
+when the filter itself contains quotes, put single quotes on the outside:
+`sbt 'testOnly * -- -z "wait states"'`. That is why this chapter writes
+`sbt "testOnly * -- -l Unnecessary"` (no inner quotes needed — a tag name has no
+spaces) but Chapter 12 writes `sbt 'testOnly … -- -z "combinational"'`.
+
+*There is no negative name filter.* ScalaTest has no "`-z` but inverted" — you
+cannot say *run everything except this test* by name. Exclusion is exactly what
+tags are for, which is the reason `Unnecessary` exists above. To make an
+exclusion permanent rather than typing it each time, it belongs in `build.sbt` as
+`Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", "Unnecessary")`
+(no chapter in this tutorial does that, so it is not exercised here).
+
+Finally, one ScalaTest option that looks applicable and is not: `-q`, which
+filters by suite-name *suffix*, is rejected outright under sbt.
+
+```
+[error] java.lang.IllegalArgumentException: Discovery suffixes (-q) is not supported
+        when running ScalaTest from sbt; Please use sbt's test-only or test filter instead.
+```
+
+Use a `testOnly` glob (`*Test`) instead.
 
 ### 13.2.3 Accessing internal signals with `BoringUtils`
 
@@ -324,10 +516,10 @@ exactly what we would do by hand, without cluttering the original code. At the
 time of writing, `BoringUtils` is still considered **experimental**, so it must
 be imported from:
 
+`src/main/scala/Boring.scala`
 ```scala
 import chisel3.util.experimental.BoringUtils
 ```
-*illustrative — the import needed for `BoringUtils`*
 
 To carry the additional port, we wrap the DUT in another top-level module used
 only for testing:

@@ -67,13 +67,15 @@ transition (the mid-bounce sample can go either way — both are fine).*
 We generate the slow sampling with a counter that emits a single-cycle `tick`
 (the timing-tick pattern from Chapter 6). First we pick the divide factor:
 
+`src/main/scala/Debounce.scala`
 ```scala
-val fac = 100000000/100
+class Debounce(fac: Int = 100000000 / 100) extends Module {
 ```
-*illustrative* — the tutorial project passes this same factor in as the
-`Debounce` constructor's default argument (`fac: Int = 100000000 / 100`)
-rather than a bare `val`, so it can be tuned per instance (see §7.6's test,
-which uses a much smaller `fac` to keep simulation short).
+
+The book writes that factor as a bare `val fac = 100000000/100` inside the
+module. The tutorial project passes the same number in as the constructor's
+**default argument** instead, so it can be tuned per instance — see §7.6's test,
+which uses a much smaller `fac` to keep simulation short.
 
 On each tick we latch the synchronized input:
 

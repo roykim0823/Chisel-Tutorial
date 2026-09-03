@@ -581,8 +581,11 @@ sbt 'testOnly CounterDeviceTest -- -z "combinational"'
 [info] All tests passed.
 ```
 
-(`-z` filters by test name; the bare subject lines are the other groups in the
-suite, which the filter skipped.)
+(`-z` filters by test name: it runs the tests whose full name — subject line
+plus clause — contains that substring. The bare subject lines above are the
+other groups in the suite, which the filter skipped. The full set of filters —
+`-z`, `-t`, tags, packages, and the sbt-level suite globs — is in
+[Chapter 13 §13.2.2](../ch13-debugging-testing-verification/README.md#1322-selecting-tests-with-tags--and-the-other-filters).)
 
 Same-cycle acknowledgment has been criticized — a single-cycle transaction is
 rarely realistic in a larger system — leading to the **SimpCon** proposal: a

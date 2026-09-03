@@ -229,19 +229,26 @@ Chisel 5 requires installing the `firtool` binary manually. **Chisel 6 bundles
 `firtool`**, which is why it's the recommended version. Its `build.sbt` — the one
 this tutorial pins everywhere — is:
 
+`build.sbt`
 ```scala
 scalaVersion := "2.13.14"
 
+val chiselVersion = "6.5.0"
+
 scalacOptions ++= Seq(
-  "-deprecation", "-feature", "-unchecked", "-language:reflectiveCalls",
+  "-deprecation",
+  "-feature",
+  "-unchecked",
+  "-language:reflectiveCalls",
 )
 
-val chiselVersion = "6.5.0"
 addCompilerPlugin("org.chipsalliance" % "chisel-plugin" % chiselVersion cross CrossVersion.full)
 libraryDependencies += "org.chipsalliance" %% "chisel" % chiselVersion
 libraryDependencies += "edu.berkeley.cs" %% "chiseltest" % "6.0.0"
 ```
-*illustrative*
+
+That is this chapter's own `build.sbt`, minus its comment header — every chapter
+in the tutorial pins exactly these versions.
 
 The book covers, and has been tested with, **Chisel 3.5, 3.6, 5, and 6**.
 
@@ -415,10 +422,12 @@ Result is: 2
 class SimpleTestExpect extends AnyFlatSpec with ChiselScalatestTester {
   "DUT" should "pass" in {
     test(new DeviceUnderTest) { dut =>
-      dut.io.a.poke(0.U); dut.io.b.poke(1.U)
+      dut.io.a.poke(0.U)
+      dut.io.b.poke(1.U)
       dut.clock.step()
       dut.io.out.expect(0.U)
-      dut.io.a.poke(3.U); dut.io.b.poke(2.U)
+      dut.io.a.poke(3.U)
+      dut.io.b.poke(2.U)
       dut.clock.step()
       dut.io.out.expect(2.U)
     }
@@ -439,15 +448,28 @@ A passing `expect` prints no hardware values — just that the suite passed:
 [info] All tests passed.
 ```
 
-A **failing** `expect` reports the mismatch and where it happened. If you changed
-the last line to `expect(4.U)` you'd see:
+A **failing** `expect` reports the mismatch and where it happened. Change the
+last line of `SimpleTestExpect` to `expect(3.U)` and run
+`sbt "testOnly SimpleTestExpect"`:
 
-*illustrative — output of a deliberately broken expect*
 ```
+[info] SimpleTestExpect:
+[info] DUT
 [info] - should pass *** FAILED ***
-[info]   io_out=2 (0x2) did not equal expected=4 (0x4)
-                   (lines in testing.scala: 27) (testing.scala:35)
+[info]   In step 2: io_out=2 (0x2) did not equal expected=3 (0x3) at (testing.scala:68) (testing.scala:68)
 ```
+
+`In step 2` is the number of `clock.step()` calls that had happened, `io_out` is
+the port's generated name, and `testing.scala:68` is the failing `expect` line
+(printed twice — chiseltest reports the location and ScalaTest appends its own).
+
+> Pick a wrong value that still **fits** the port. `io.out` is a `UInt<2>`, so
+> `expect(4.U)` does not produce a mismatch at all — it fails earlier, while
+> chiseltest is converting the literal:
+>
+> ```
+> [info]   chisel3.package$ChiselException: Value 4 does not fit into the range of DeviceUnderTest.io.out: IO[UInt<2>] (0 ... 3)
+> ```
 
 The plain **`peek()`** returns a *Chisel* type, which you'd have to convert to
 use in Scala. To make that easy, ChiselTest adds **`peekInt()`** and
@@ -616,7 +638,7 @@ interleaved above):
 2. **Break a test.** In `src/test/scala/testing.scala` change a
    `SimpleTestExpect` expectation to a wrong value, run
    `sbt "testOnly SimpleTestExpect"`, and read the failure message (compare it
-   to the illustrative one in §3.2.2). Revert.
+   to the one captured in §3.2.2). Revert.
 3. **Look at a waveform.** Run `sbt "testOnly WaveformCounterTest"` and open the
    `.vcd` under `test_run_dir/…` in GTKWave. Confirm `out` equals `a & b` each
    cycle.

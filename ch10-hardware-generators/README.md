@@ -966,11 +966,12 @@ Naming that function is optional. The combining function can be written straight
 into the call as an anonymous **function literal** — parameters in parentheses,
 then `=>`, then the body:
 
-*illustrative — the shape of a function literal*
+`src/main/scala/FunctionalAdd.scala`
 ```scala
-// (param) => function body
-val sumLiteral = vec.reduce((a: UInt, b: UInt) => a + b)
+  val sumLiteral = vec.reduce((a: UInt, b: UInt) => a + b)
 ```
+
+Read the literal as `(param) => function body`.
 
 Filled in for the adder above, the parameters are the two operands and the body
 is their sum, so the literal reads `(a: UInt, b: UInt) => a + b` and the whole
@@ -1278,10 +1279,13 @@ two inner ops are independent and settle in parallel.
 To be sure the tuple is not the culprit, take variant (b)'s `Bundle` unchanged and
 swap only the fold:
 
-*illustrative — a control experiment, not part of the project*
+`src/main/scala/FunctionalMin.scala`
 ```scala
   val res = vecTwo.reduce((x, y) => Mux(x.v < y.v, x, y))   // reduce, not reduceTree
 ```
+
+That line is the whole of `MinBundleReduce`, which is variant (b) with nothing
+else changed. Reproduce it with `sbt "runMain FunctionalMinControl"`:
 
 That emits (c)'s chain exactly — sequential `_res_T` → `_res_T_2` → `_res_T_4`, and
 the same nested index mux — from a `Bundle`:
@@ -1365,11 +1369,13 @@ That last line *is* the tree. Everything specific to *how* two requests are
 arbitrated arrives as `arbitrate` — an ordinary function value — so one class
 covers both arbiters:
 
-*illustrative*
+`src/main/scala/ArbiterTree.scala`
 ```scala
-new Arbiter(4, UInt(8.W), arbitrateSimp)   // priority
-new Arbiter(4, UInt(8.W), arbitrateFair)   // fair
+//   new Arbiter(4, UInt(8.W), arbitrateSimp)   // priority
+//   new Arbiter(4, UInt(8.W), arbitrateFair)   // fair
 ```
+
+(That is the usage note in the file's own header comment, above `class Arbiter`.)
 
 and the two named trees are nothing but the base class with one function
 plugged in:
@@ -2121,11 +2127,17 @@ blocks come first:
 Both are built from the same class — this is what taking the arbitration
 function as a parameter buys — and driven with identical stimulus:
 
-*illustrative — the two devices under test*
+`src/test/scala/ArbiterOrderTest.scala`
 ```scala
-new Arbiter(2, UInt(8.W), arbitrateSimp[UInt])          // decide, then capture
-new Arbiter(2, UInt(8.W), arbitrateSimpSwapped[UInt])   // capture, then decide
+    test(new Arbiter(2, UInt(8.W), arbitrateSimp[UInt])) { d =>
 ```
+
+`src/test/scala/ArbiterOrderTest.scala`
+```scala
+    test(new Arbiter(2, UInt(8.W), arbitrateSimpSwapped[UInt])) { d =>
+```
+
+The first decides and then captures; the second captures and then decides.
 
 ### The difference in behaviour
 

@@ -20,11 +20,19 @@ digital circuit is made:
 2. **Registers** (state) — outputs depend on inputs *and* the past
    (flip-flops that update on the clock edge).
 
-Two of the book's example files anchor this chapter:
-`src/main/scala/Logic.scala` (all the combinational examples) and
-`src/main/scala/RegisterFile.scala` (registers/`Vec`/`Bundle`). Smaller
-concept snippets that aren't a standalone file are shown **inline and marked as
-illustrative**.
+Four source files anchor this chapter, and every Chisel snippet below is a
+verbatim excerpt from one of them:
+
+| File | Holds |
+|------|-------|
+| `src/main/scala/Logic.scala` | the types, constants, operators, `Wire`, bit extraction, and the `Mux` (§2.1–2.3, §2.7) |
+| `src/main/scala/Registers.scala` | the register forms, the counter, and the `WireDefault`/`RegInit` best practices — classes `Registers` and `Defaults` (§2.4, §2.8) |
+| `src/main/scala/Structure.scala` | the `Bundle` and `Vec` constructs — the `Channel` and `BundleVec` bundles and the `Structure` module (§2.5, §2.6) |
+| `src/main/scala/RegisterFile.scala` | the register file itself: registers + `Vec` + `Bundle` + `Option` (§2.6) |
+
+Only two snippets in the whole chapter are **not** project code, and both say so
+where they appear: the illegal partial assignment in §2.7 (it cannot compile by
+definition) and the FPGA port in Exercise 4 (it belongs to a different project).
 
 > **Quick start — jump to [§2.11](#211-build-run-and-check) to build, run, and
 > test right now**, then come back for the concepts. Or read top-to-bottom.
@@ -132,18 +140,26 @@ code works for both.*
 You did not declare `logic`'s type or width — Chisel **infers** both from the
 expression. Remember: this creates *gates*, it does not compute a number.
 
-**Bitwise / arithmetic operators** (condensed cheat-sheet; each of these
-appears as a named `val` in `src/main/scala/Logic.scala`, e.g. `val a_and_b = a & b`):
+**Bitwise and arithmetic operators.** Chapter 2's full set, each one built as a
+named `val` so the module holds one instance of every operator:
 
+`src/main/scala/Logic.scala`
 ```scala
-a & b   // AND        a + b   // add
-a | b   // OR          a - b   // subtract
-a ^ b   // XOR        -a       // negate
-~a      // NOT         a * b   // multiply (width = sum of widths)
-                       a / b   // divide
-                       a % b   // modulo
+val a_and_b = a & b // bitwise and of a and b
+val a_or_b = a | b  // bitwise or of a and b
+val a_xor_b = a ^ b // bitwise xor of a and b
+val a_not = ~a      // bitwise negation of a
 ```
-*illustrative*
+
+`src/main/scala/Logic.scala`
+```scala
+val a_plus_b = a + b  // addition of a and b
+val a_minus_b = a - b // subtraction of b from a
+val neg_a = -a        // negate a
+val a_mul_b = a * b   // multiplication of a and b
+val a_div_b = a / b   // division of a by b
+val a_mod_b = a % b   // modulo operation of a by b
+```
 
 Width rules: add/subtract → max of the two widths; multiply → sum of widths;
 divide/modulo → width of the numerator.
@@ -245,13 +261,15 @@ feed a multiplexer selected by `reset`; its output goes to the D input of the
 flip-flop, whose output `q` updates on the rising edge of `clock`. Chisel wires
 `clock` and `reset` implicitly — you never declare them.*
 
-*illustrative — the standard forms*
-```scala
-val reg = RegInit(0.U(8.W))  // 8-bit register, resets to 0
-reg := d                     // drive its input; read it just by name (reg)
+The standard forms, all three in `Registers`:
 
-val r2 = RegNext(d)          // register whose input is d (no reset value)
-val r3 = RegNext(d, 0.U)     // input d, resets to 0
+`src/main/scala/Registers.scala`
+```scala
+val reg = RegInit(0.U(8.W)) // 8-bit register, resets to 0
+reg := d                    // drive its input; read it just by name (reg)
+
+val r2 = RegNext(d)         // register whose input is d (no reset value)
+val r3 = RegNext(d, 0.U)    // input d, resets to 0
 ```
 
 **Naming convention:** postfix register names with `Reg` (e.g. `cntReg`,
@@ -267,7 +285,7 @@ appendix).
 Counting clock cycles is how you measure time in hardware. A counter that runs
 0→9 and wraps:
 
-*illustrative*
+`src/main/scala/Registers.scala`
 ```scala
 val cntReg = RegInit(0.U(8.W))
 cntReg := cntReg + 1.U
@@ -296,11 +314,18 @@ Chisel groups related signals two ways:
 
 Both create **new, user-defined Chisel types** and can be nested arbitrarily.
 
+Everything in this section is real code in `src/main/scala/Structure.scala`: two
+bundle types (`Channel`, `BundleVec`) and a `Structure` module that builds each
+construct and routes it to an output port so a test can see it. Like
+`Logic.scala`, it starts by aliasing its ports to bare names (`val x = io.x`,
+`val sel = io.sel`, …), which is why the snippets below read `m(0) := x` rather
+than `m(0) := io.x`.
+
 ### Bundle
 
 Define a bundle by extending `Bundle` and listing its fields as `val`s:
 
-*illustrative*
+`src/main/scala/Structure.scala`
 ```scala
 class Channel() extends Bundle {
   val data = UInt(32.W)
@@ -310,7 +335,7 @@ class Channel() extends Bundle {
 
 Create one with `new`, wrap it in a `Wire`, and access fields with dot notation:
 
-*illustrative*
+`src/main/scala/Structure.scala`
 ```scala
 val ch = Wire(new Channel())
 ch.data := 123.U
@@ -321,7 +346,7 @@ val b = ch.valid
 
 A bundle can also be referenced as a whole:
 
-*illustrative*
+`src/main/scala/Structure.scala`
 ```scala
 val channel = ch
 ```
@@ -331,7 +356,7 @@ val channel = ch
 A combinational `Vec` is created with a size and an element type, and **wrapped
 in a `Wire`**; individual elements are accessed with `(index)`:
 
-*illustrative*
+`src/main/scala/Structure.scala`
 ```scala
 val v = Wire(Vec(3, UInt(4.W)))
 
@@ -340,14 +365,14 @@ v(1) := 3.U
 v(2) := 5.U
 
 val index = 1.U(2.W)
-val a = v(index)         // dynamic index = a multiplexer
+val a = v(index) // dynamic index = a multiplexer
 ```
 
 A combinational `Vec` indexed by a signal is **literally a multiplexer**. For
 example, connecting three wires `x`, `y`, `z` into a `Vec` and reading it with a
 `select` signal picks one of them onto `muxOut`:
 
-*illustrative*
+`src/main/scala/Structure.scala`
 ```scala
 val m = Wire(Vec(3, UInt(8.W)))
 m(0) := x
@@ -370,10 +395,10 @@ first constant), which a `when` can overwrite (three more 2:1 muxes); the last
 line selects one input. `VecInit` **already returns hardware**, so — unlike a
 plain `Vec` — it need not be wrapped in a `Wire`:
 
-*illustrative*
+`src/main/scala/Structure.scala`
 ```scala
 val defVec = VecInit(1.U(3.W), 2.U, 3.U)
-when (cond) {
+when(cond) {
   defVec(0) := 4.U
   defVec(1) := 5.U
   defVec(2) := 6.U
@@ -384,7 +409,7 @@ val vecOut = defVec(sel)
 `VecInit` can be fed **signals**, not just constants — here wires `d`, `e`, `f`
 drive the three `Vec` inputs:
 
-*illustrative*
+`src/main/scala/Structure.scala`
 ```scala
 val defVecSig = VecInit(d, e, f)
 val vecOutSig = defVecSig(sel)
@@ -410,14 +435,14 @@ this project.
 Bundles and vectors mix freely. A **`Vec` of a `Bundle`** type takes the bundle
 as its element prototype:
 
-*illustrative*
+`src/main/scala/Structure.scala`
 ```scala
 val vecBundle = Wire(Vec(8, new Channel()))
 ```
 
 A **`Bundle` containing a `Vec`** field:
 
-*illustrative*
+`src/main/scala/Structure.scala`
 ```scala
 class BundleVec extends Bundle {
   val field = UInt(8.W)
@@ -428,7 +453,7 @@ class BundleVec extends Bundle {
 For a **register of a bundle type that needs a reset value**, first build a
 `Wire` of the bundle, set its fields, then pass it to `RegInit`:
 
-*illustrative*
+`src/main/scala/Structure.scala`
 ```scala
 val initVal = Wire(new Channel())
 
@@ -502,7 +527,7 @@ The `Seq.fill(32)(0.U(32.W))` above resets *every* register to the same value.
 When you instead want **distinct reset values per register**, list them in the
 `VecInit` directly (and you can still connect each element's input separately):
 
-*illustrative*
+`src/main/scala/Structure.scala`
 ```scala
 val initReg = RegInit(VecInit(0.U(3.W), 1.U, 2.U))
 val resetVal = initReg(sel)
@@ -568,11 +593,16 @@ They become hardware only when wrapped:
 You **name** a hardware object with Scala's `=`, and you **drive** an existing
 object with Chisel's `:=`:
 
-*illustrative*
+`src/main/scala/Logic.scala`
 ```scala
-val w = Wire(UInt(8.W))  //  =  : create and name the hardware
-w := a & b               //  := : drive a value onto existing hardware
+val w = Wire(UInt())
+w := a & b
 ```
+
+The first line uses Scala's `=` to *create and name* the hardware; the second
+uses Chisel's `:=` to *drive a value onto* hardware that already exists. (This
+`Wire` leaves its width to inference — the third best practice below says to
+spell it out, as `Defaults` does.)
 
 (Scala also has mutable `var`, but it is useless for describing hardware — you
 name hardware once with `val` and drive it with `:=`.)
@@ -583,14 +613,14 @@ Best practices the book stresses:
   path (an unassigned combinational signal would be a latch, which Chisel
   rejects). `WireDefault` folds the default into the declaration:
 
-  *illustrative*
+  `src/main/scala/Registers.scala`
   ```scala
   val number = WireDefault(10.U(4.W))
   ```
 - Give registers a **reset value** (`RegInit`) so simulation/verification is
   deterministic:
 
-  *illustrative*
+  `src/main/scala/Registers.scala`
   ```scala
   val reg = RegInit(0.S(8.W))
   ```
@@ -662,6 +692,12 @@ $ sbt test
 Expected output:
 
 ```
+[info] StructureTest:
+[info] RegistersTest:
+[info] Structure
+[info] - should mux with a Vec and default with a VecInit
+[info] Registers
+[info] - should delay its input by one cycle and count 0 to 9
 [info] LogicTest:
 [info] Logic
 [info] - should pass
@@ -670,15 +706,17 @@ Expected output:
 [info] - should have a debug port
 [info] RegisterFile
 [info] - should work without the debug port
-[info] Run completed in 1 second, 32 milliseconds.
-[info] Total number of tests run: 3
-[info] Suites: completed 2, aborted 0
-[info] Tests: succeeded 3, failed 0, canceled 0, ignored 0, pending 0
+[info] Run completed in 1 second, 219 milliseconds.
+[info] Total number of tests run: 5
+[info] Suites: completed 4, aborted 0
+[info] Tests: succeeded 5, failed 0, canceled 0, ignored 0, pending 0
 [info] All tests passed.
 [success] Total time: 4 s
 ```
 
-Three tests, all green.
+Five tests in four suites, all green. (`StructureTest` and `RegistersTest` print
+their headers first because sbt runs suites in parallel — the order varies
+between runs and means nothing.)
 
 ### (b) Generate the SystemVerilog — to *see* the hardware
 
@@ -687,8 +725,15 @@ Three tests, all green.
 import chisel3._
 
 object Generate extends App {
-  emitVerilog(new Logic())
-  emitVerilog(new RegisterFile(true))
+  // Collect the emitted .sv files in one folder instead of the project root.
+  // Chisel's own default target directory is "." - `--target-dir` overrides it.
+  val opts = Array("--target-dir", "generated")
+
+  emitVerilog(new Logic(), opts)
+  emitVerilog(new RegisterFile(true), opts)
+  emitVerilog(new Structure(), opts)
+  emitVerilog(new Registers(), opts)
+  emitVerilog(new Defaults(), opts)
 }
 ```
 
@@ -696,15 +741,33 @@ object Generate extends App {
 $ sbt "runMain Generate"
 ```
 
-This writes **`generated/Logic.sv`** and **`generated/RegisterFile.sv`**. Open
-them and match the ports to the `io` bundles. In `RegisterFile.sv` you will see 32
-outputs `io_dbgPort_0 … io_dbgPort_31` — that is the debug `Vec` flattened into
-individual ports.
+This writes five files into `generated/`: **`Logic.sv`**,
+**`RegisterFile.sv`**, **`Structure.sv`**, **`Registers.sv`**, and
+**`Defaults.sv`**. Open them and match the ports to the `io` bundles. Three
+things to look for:
+
+- In `RegisterFile.sv`, 32 outputs `io_dbgPort_0 … io_dbgPort_31` — the debug
+  `Vec` flattened into individual ports.
+- In `Structure.sv`, no `Channel` or `BundleVec` type anywhere. A `Bundle` is a
+  *type*, not hardware: it gets no `.sv` of its own and survives only as
+  flattened signals. The bundle register `channelReg` becomes one signal,
+  `reg [31:0] channelReg_data` — and its `valid` field is missing entirely,
+  because no output reads it.
+- In `Registers.sv`, the counter as a clocked process. Note it is
+  `always @(posedge clock)`, **not** `always_ff` — firtool does not emit
+  `always_ff`, whatever hand-written SystemVerilog style guides recommend.
+- `Defaults.sv` is almost empty: both ports come out as constants
+  (`assign io_number = 4'hA;` and `assign io_reg = 8'h0;`) and the register is
+  gone, because nothing drives it. §2.9 again — hardware nothing depends on is
+  not built.
 
 ### (c) Understand the test bench
 
-Testing is covered fully in the book's Chapter 3, but here is enough to read
-`src/test/scala/LogicTest.scala`:
+Testing gets a chapter of its own next
+([Chapter 3](../ch03-build-and-testing/README.md)) and a deeper one at the end
+([Chapter 13](../ch13-debugging-testing-verification/README.md)). What follows is
+the short version — enough to *read, run, and debug* every test bench from here
+through Chapter 12, starting with `src/test/scala/LogicTest.scala`:
 
 `src/test/scala/LogicTest.scala`
 ```scala
@@ -715,15 +778,15 @@ import org.scalatest.flatspec.AnyFlatSpec
 class LogicTest extends AnyFlatSpec with ChiselScalatestTester {
   "Logic" should "pass" in {
     test(new Logic) { dut =>
-      dut.io.a.poke(1.U)          // drive an input
+      dut.io.a.poke(1.U)
       dut.io.b.poke(0.U)
       dut.io.c.poke(1.U)
-      dut.clock.step()            // advance one clock cycle
-      dut.io.out.expect(1.U)      // (1 & 0) | 1 = 1
-      dut.io.cat.expect("hff01".U)
-      dut.io.ch.expect(65.U)      // 'A'
+      dut.clock.step()
+      dut.io.out.expect(1.U)      // (a & b) | c = (1 & 0) | 1 = 1
+      dut.io.cat.expect("hff01".U) // highByte ## lowByte = 0xff ## 0x01
+      dut.io.ch.expect(65.U)       // 'A' in ASCII
       dut.io.word.expect("hff01".U)
-      dut.io.result.expect(5.U)
+      dut.io.result.expect(5.U)    // the 4 bits of 5.U reassembled
     }
   }
 }
@@ -733,12 +796,117 @@ class LogicTest extends AnyFlatSpec with ChiselScalatestTester {
 - **`step()`** advances the simulated clock by one cycle.
 - **`expect`** asserts an output equals a value; a mismatch fails the test.
 
+**Which of those words are Chisel?** None of them is new *syntax* — every line
+above is an ordinary Scala method call, and the vocabulary comes from four
+different places:
+
+| In a test bench | Provided by | Arrives with |
+|-----------------|-------------|--------------|
+| `class … extends … with …`, the `{ dut => … }` block | the **Scala language** itself | — |
+| `AnyFlatSpec`, `"Logic" should "pass" in { … }` | **ScalaTest**, a general-purpose Scala test library | `org.scalatest.flatspec.AnyFlatSpec` |
+| `ChiselScalatestTester`, `test(…)`, `poke`, `expect`, `clock.step()` | **chiseltest**, a separate library that drives a simulator | `chiseltest._` |
+| `.U`, `.B`, `io`, the module being tested | **chisel3** | `chisel3._` |
+
+Two consequences worth absorbing now, because they remove most of the mystery:
+
+- `should` and `in` are **methods, not keywords**. `"Logic" should "pass"` is
+  `"Logic".should("pass")` — Scala's infix notation just lets you drop the dot
+  and the parentheses. Likewise `poke` and `expect` are methods chiseltest
+  *adds* to Chisel ports; plain `chisel3` has no `poke` at all.
+- `dut` is a **name you picked**. `test(new Logic) { dut => … }` hands your block
+  a live, running instance: chiseltest elaborates the module, starts a simulator,
+  loans you the instance, and tears it down when the block ends. Later chapters
+  call it `c` instead; nothing changes.
+
+*Scala note — the `{ dut => … }` block is a function literal →
+[§E.1](../SCALA-NOTES.md#e1-function-literals-lambdas-and-the--arrow); the
+`should` / `in` chain → [§K](../SCALA-NOTES.md#k-scalatest-dsl-reads-like-english-is-really-scala).*
+
 `src/test/scala/RegisterFileTest.scala` does the same for the register file:
 it writes `123` to register 4, steps the clock, then checks that reading
 register 4 (`rs1Val`) returns `123` **and** that the debug port shows `123` at
 index 4. A second test builds the module *without* the debug port
 (`new RegisterFile(false)`) and confirms it still works — demonstrating the
 `Option`-based generator from §2.6.
+
+**Running less than everything.** `sbt test` runs both suites here, but later
+projects have many (Chapter 12 has eight), and while debugging you want one:
+
+```
+$ sbt "testOnly LogicTest"
+[info] LogicTest:
+[info] Logic
+[info] - should pass
+[info] Run completed in 1 second, 1 millisecond.
+[info] Total number of tests run: 1
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 1, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+`-z` narrows further, to individual tests *inside* a suite. It matches any
+substring of a test's full name — the subject line plus the clause after
+`should`:
+
+```
+$ sbt 'testOnly RegisterFileTest -- -z "without the debug port"'
+[info] RegisterFileTest:
+[info] RegisterFile
+[info] RegisterFile
+[info] - should work without the debug port
+[info] Run completed in 782 milliseconds.
+[info] Total number of tests run: 1
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 1, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+The bare `RegisterFile` line with nothing under it is the *other* test in the
+suite, which the filter skipped. One caveat: a filter that matches **nothing**
+is not an error — it reports `Total number of tests run: 0` and still exits
+green, so read that count rather than the `[success]`. The full set of filters
+(`-t`, tags, packages, suite globs) is in
+[§13.2.2](../ch13-debugging-testing-verification/README.md#1322-selecting-tests-with-tags--and-the-other-filters).
+
+**Reading a failure.** Break the design on purpose — change line 51 of
+`src/main/scala/Logic.scala` from `val logic = (a & b) | c` to
+`val logic = a & b & c` — and the bench says:
+
+```
+[info] LogicTest:
+[info] Logic
+[info] - should pass *** FAILED ***
+[info]   In step 1: io_out=0 (0x0) did not equal expected=1 (0x1) at (LogicTest.scala:12) (LogicTest.scala:12)
+[info] Tests: succeeded 0, failed 1, canceled 0, ignored 0, pending 0
+[info] *** 1 TEST FAILED ***
+```
+
+Four pieces of information are packed into that one line, and they are the whole
+debugging loop for the next ten chapters:
+
+- **`In step 1`** — how many `clock.step()` calls had happened when the check
+  ran, so you know *which cycle* to look at.
+- **`io_out`** — the port's *generated* name. Chisel flattens `io.out` to
+  `io_out`, which is exactly the name to search for in `Logic.sv` or in a
+  waveform.
+- **`=0 (0x0) did not equal expected=1 (0x1)`** — actual first, then expected,
+  each in decimal and hex.
+- **`(LogicTest.scala:12)`** — the failing `expect` line, *not* the `poke` that
+  caused it. It appears twice because ScalaTest appends its own location to the
+  one chiseltest already reported.
+
+**What Chapters 3 and 13 add.** Come back to these when you need them; nothing
+below is required to follow Chapters 4–12.
+
+| Topic | Where |
+|-------|-------|
+| ScalaTest and ChiselTest properly, from the ground up | [§3.2.1](../ch03-build-and-testing/README.md#321-scalatest-the-foundation), [§3.2.2](../ch03-build-and-testing/README.md#322-chiseltest) |
+| VCD waveforms (`WriteVcdAnnotation`) and `printf` debugging | [§3.2.3](../ch03-build-and-testing/README.md#323-waveforms), [§3.2.4](../ch03-build-and-testing/README.md#324-printf-debugging) |
+| Factoring a bench into a `def` or a reusable `trait` | [§13.2.1](../ch13-debugging-testing-verification/README.md#1321-use-functions) |
+| Tags, and every way to select which tests run | [§13.2.2](../ch13-debugging-testing-verification/README.md#1322-selecting-tests-with-tags--and-the-other-filters) |
+| Reaching *internal* signals with `BoringUtils` | [§13.2.3](../ch13-debugging-testing-verification/README.md#1323-accessing-internal-signals-with-boringutils) |
+| Concurrent stimulus with `fork`/`join` | [§13.2.4](../ch13-debugging-testing-verification/README.md#1324-multithreaded-testing-forkjoin) |
+| Hardware `assert` and formal verification | [§13.3](../ch13-debugging-testing-verification/README.md#133-assertions), [§13.4](../ch13-debugging-testing-verification/README.md#134-formal-verification) |
 
 ---
 
@@ -752,14 +920,27 @@ index 4. A second test builds the module *without* the debug port
 - `Bundle` groups named signals; `Option` + Scala `if` let one module generate
   different hardware (the debug port).
 - Chisel **builds** a parallel hardware graph — it does not run like software.
+- A test bench is three libraries stacked on Scala: ScalaTest supplies
+  `should`/`in`, chiseltest supplies `test`/`poke`/`expect`/`step` — none of it
+  is Chisel syntax (§2.11(c)).
 
 ---
 
 ## 2.13 Exercises
 
-1. **Break a test on purpose.** In `src/main/scala/Logic.scala` change the mux
-   to `Mux(sel, b, a)` (swap the inputs), run `sbt test`, and read the failure
-   message. Then revert.
+1. **Break a test on purpose.** In `src/main/scala/Logic.scala` change line 51
+   from `val logic = (a & b) | c` to `val logic = a & b & c`, run `sbt test`, and
+   read the failure message (decoded in [§2.11(c)](#c-understand-the-test-bench)).
+   Then revert.
+
+   Now try a break that *doesn't* fail: swap the mux inputs on line 84 to
+   `Mux(sel, b, a)` and run `sbt test` again — still green. Why? `val result` on
+   that line is never connected to a port, so no output depends on it and no test
+   can see it. Confirm it with `sbt "runMain Generate"`: `Logic.sv` has no mux at
+   all, and `io_result` (driven from the *other* `result` at line 108) is the
+   constant `assign io_result = 4'h5;`. Dead hardware is optimized away — the
+   §2.9 mental model in action, and a reminder that a passing test only covers
+   what its ports can observe.
 2. **Add an XOR output.** Add `val xor = Output(UInt(1.W))` to `Logic`'s `io`,
    drive it with `io.xor := a ^ b`, regenerate with `sbt "runMain Generate"`,
    and find the new port in `Logic.sv`. (Optionally add an `expect` for it in

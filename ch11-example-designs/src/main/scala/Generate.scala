@@ -28,4 +28,6 @@ object Generate extends App {
   emitVerilog(new uart.Sender(50000000, 115200), opts)          // UART "Hello World!" sender
   emitVerilog(new uart.Echo(50000000, 115200), opts)            // Rx -> Tx echo
   emitVerilog(new uart.UartLoopback(50000000, 115200), opts)    // Tx -> Rx loopback
+
+  emitVerilog(new MultiClockMemory(2), opts)                    // one memory, two clock domains
 }
