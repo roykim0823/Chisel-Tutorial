@@ -953,31 +953,24 @@ Every other row is a consequence of those two:
 | Combinational path master→slave→master | **yes** | no | no |
 | Measured throughput | 1 per cycle with no wait states, 1 per 3 with two | 1 per 2 cycles | **1 per cycle** |
 
-Read as a choice rather than a taxonomy, each column has a shape:
+**Which to use.** It turns on one thing outside the slave: can the master have
+more than one command in flight?
 
-| Scheme | Pros | Cons | Choose it when |
+| Master | Use | Why | Cost |
 |---|---|---|---|
-| **Combinational** | fastest possible transfer — one cycle when the device is ready; simplest slave (no state in the ack path); wait states cost nothing to add | the master→decoder→slave→master path caps the clock frequency, and it gets worse with every device added to the decode | the system is small and slow-clocked, or the device is a handful of registers |
-| **Registered** | no combinational path, so timing closes; still one transaction at a time, so no ordering to track on either side; the slave can read `address` directly instead of capturing it | half the throughput — two cycles per transfer even when the device is instantly ready; the bus is blocked for the whole transaction | peripherals and control/status registers, where transfers are rare and a simple master matters most |
-| **Pipelined** | no combinational path *and* full throughput — one transfer per cycle sustained; the bus is free the cycle after the command | the master must remember what it asked for, and the slave must capture the address; latency is never below one cycle, even for a trivial device | the path carries real traffic — memory, DMA, a processor's data port |
+| blocks on every access, clock slow enough | combinational | **lowest latency**: one cycle per transfer, the fewest of the three | the master→decoder→slave→master path sets the maximum clock frequency, and lengthens with every device on the decode |
+| blocks on every access, that path won't meet timing | registered | the combinational path is gone, and one transfer at a time keeps both sides simple | two cycles per transfer, and the bus is held for both |
+| several accesses in flight (cache refill, DMA) | pipelined | **highest throughput**: the only one that sustains one transfer per cycle | an address register in every slave, plus a master that can match each ack to the command that earned it |
 
-The registered style answers question 1 and stops there. It removes the
-combinational path — the master's `ack` input now comes straight out of a
-flop — but the master is still required to keep address and command asserted
-until that ack arrives, so the bus is occupied for the whole transaction and
-nothing else can be issued meanwhile. A minimum-latency transfer costs the
-request cycle plus the ack cycle: two cycles, half the throughput of the
-combinational protocol at zero wait states. **Registered is half a fix.**
+Pipelined therefore wins on throughput and loses on everything else. If the
+master blocks anyway that cost buys nothing, and two cycles per transfer against
+the combinational device's one makes it the *slower* choice. Registered pays the
+extra cycle but none of the bookkeeping, which is why it is the usual pick for
+peripherals: ARM ships APB for those and AXI for memory in the same chip.
 
-The pipelined style answers both. The command is a single-cycle pulse and the
-master lets go of it immediately, so the slave can be handed a second command
-while the first result is still on its way back. That is what makes one
-transfer per cycle possible in Figure 12.4, and it is the only one of the three
-that gets there. The price is bookkeeping: since `ack` no longer arrives while
-the request that caused it is still being driven, it refers to *a command
-issued some cycles ago*, and master and slave must agree on the order — which
-is exactly why `ReqAckToWishbone` in Section 12.5 needs a state machine, and
-why AXI eventually needs [transaction ids](APPENDIX-AXI4.md#a4-transaction-ids-and-out-of-order-completion).
+The throughput row above assumes the ideal master, by the way: `reqAckRate`
+holds `rd` high for the whole window and the pipelined test issues a fresh
+command every cycle.
 
 The fourth combination — a combinational `ack` with a single-cycle command — is
 degenerate rather than useful. If the master releases the request after one
@@ -1093,11 +1086,19 @@ recognising by name, and the links are the reference.
 
 ## 12.4 Memory-mapped devices
 
-The devices here use the **pipelined** handshake of
+The device here uses the **pipelined** handshake of
 [Section 12.3.2](#1232-the-pipelined-handshake): `MemMappedRV` drives
 `ackReg := io.mem.rd || io.mem.wr`, so a single-cycle command is answered one
 cycle later and the master never holds the bus. That is the minimum latency the
 scheme allows, and the same shape as `CounterDevice`.
+
+The choice is for comparability, not because pipelining is always right: keeping
+the handshake identical to `CounterDevice` means the only thing that differs
+between the two devices is what sits behind the port. A UART is in fact the
+case where the other schemes are competitive — software touches it rarely and
+one register at a time, so the throughput pipelining buys goes unused while its
+cost, an address register in every slave, is still paid
+([Section 12.3.4](#1234-the-three-schemes-compared)).
 
 Devices share the address space; upper address bits are decoded to select one.
 As part of the system design we must choose an address map — there is no one
