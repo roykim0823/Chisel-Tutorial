@@ -1168,7 +1168,7 @@ run `sbt "runMain Generate"` inside a chapter to (re)create it.
 | [12](ch12-interconnect/README.md) | `CounterDevice`, `UseMemMappedRV` |
 | [13](ch13-debugging-testing-verification/README.md) | `Assert`, `TickGenTestTop` |
 | [14](ch14-design-of-a-processor/README.md) | `AluAccu`, `Decode`, `DataMem` |
-| [15](ch15-a-risc-v-pipeline/README.md) | `ThreeCats`, `AluModule`, `DecodeModule`, `Csr`, `InstructionROM` |
+| [15](ch15-a-risc-v-pipeline/README.md) | `ThreeCats`, `AluModule`, `DecodeModule`, `Csr`, `InstructionROM`, `ScratchPadMem` |
 
 Designs deliberately **not** emitted:
 
@@ -1179,5 +1179,10 @@ Designs deliberately **not** emitted:
   outputs are undriven and they cannot elaborate. Same for the original
   `Processor`, whose `<>` connections no longer elaborate under Chisel 6;
   `Processor6` is the reworked version that does.
+- `ch15`'s `WildcatTop` — the simulation harness that wires the CPU to its two
+  memories. `BoringUtils.bore` gives its `ThreeCats` instance extra debug ports,
+  so emitting both it and the plain CPU would put two differently-ported modules
+  named `ThreeCats` into one `generated/` folder. The clean `ThreeCats.sv` is
+  the one to read.
 - Submodules such as `Adder`, `Tx`, `Rx`, `PopCountFSM` — already contained in
   their parent's `.sv`, per [§F](#f-modules-hierarchy-and-parameterization).

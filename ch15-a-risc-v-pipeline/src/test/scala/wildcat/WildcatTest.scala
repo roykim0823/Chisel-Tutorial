@@ -7,9 +7,10 @@ import wildcat.AluType._
 import wildcat.InstrType
 import wildcat.CSR._
 
-// Exercise the core Wildcat pieces that build without an external program:
-// the ALU and decoder functions (via wrappers), the CSR module, and the
-// instruction ROM.
+// Exercise the Wildcat pieces one at a time - the ALU and decoder functions
+// (via their wrappers), the CSR module, and the instruction ROM - and then the
+// whole ThreeCats pipeline running a small hand-assembled RV32I program in
+// WildcatTop.
 class WildcatTest extends AnyFlatSpec with ChiselScalatestTester {
 
   "Alu" should "compute the RV32I operations" in {
@@ -77,6 +78,46 @@ class WildcatTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.address.poke(8.U)
       dut.clock.step()
       dut.io.data.expect("h002081B3".U)
+    }
+  }
+
+  // The program below is hand-assembled RV32I. It ends with ecall, which the
+  // pipeline reports on `stop`.
+  val program = Array(
+    0x00A00093, // addi x1, x0, 10
+    0x01400113, // addi x2, x0, 20
+    0x002081B3, // add  x3, x1, x2   (both operands forwarded)
+    0x00302023, // sw   x3, 0(x0)
+    0x00002203, // lw   x4, 0(x0)
+    0x00000073, // ecall
+    0x00000013, // nop
+    0x00000013) // nop
+
+  "ThreeCats" should "execute a small RV32I program" in {
+    test(new WildcatTop(program)) { dut =>
+      // Three cycles of fill (fetch, decode, execute) before the first result
+      // reaches the register file.
+      dut.clock.step(3)
+      dut.io.regs(1).expect(10.U, "addi x1, x0, 10")
+
+      // From here the pipeline is full: one instruction commits per cycle.
+      dut.clock.step()
+      dut.io.regs(2).expect(20.U, "addi x2, x0, 20")
+      dut.clock.step()
+      dut.io.regs(3).expect(30.U, "add x3, x1, x2 with forwarded operands")
+
+      // sw x3 then lw x4 round-trips the value through the data memory.
+      dut.clock.step(2)
+      dut.io.regs(4).expect(30.U, "lw x4 reads back what sw x3 wrote")
+    }
+  }
+
+  it should "raise stop on ecall" in {
+    test(new WildcatTop(program)) { dut =>
+      dut.io.stop.expect(false.B)
+      // ecall is the sixth instruction, so it reaches execute in cycle 7.
+      dut.clock.step(7)
+      dut.io.stop.expect(true.B, "ecall reached the execute stage")
     }
   }
 }

@@ -18,6 +18,13 @@ object Generate extends App {
   emitVerilog(new ThreeCats(), opts)            // the full 3-stage pipelined CPU
   emitVerilog(new Csr(), opts)
   emitVerilog(new InstructionROM(program), opts)
+  emitVerilog(new ScratchPadMem(), opts)
   emitVerilog(new AluModule(), opts)
   emitVerilog(new DecodeModule(), opts)
+
+  // NOT emitted: WildcatTop. It is the test harness SoC, and BoringUtils adds
+  // debug ports to the ThreeCats instance inside it. Emitting both would put
+  // two different modules named `ThreeCats` into generated/ - Verilog has no
+  // namespaces, so that is a trap, not a feature. The clean ThreeCats.sv above
+  // is the one to read; WildcatTop exists to be simulated, not synthesized.
 }

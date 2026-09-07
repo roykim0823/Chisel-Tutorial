@@ -290,7 +290,7 @@ Click a chapter to open its walkthrough.
 | [`ch12-interconnect/`](ch12-interconnect/README.md) | On-chip bus concepts, a pipelined handshake (PipeCon), a counter IO device, and a memory-mapped bridge to a ready/valid stream; the same device rebuilt as a Wishbone and an AXI4-Lite slave, with a PipeCon→Wishbone bridge — plus an [AXI4 appendix](ch12-interconnect/APPENDIX-AXI4.md) on bursts, ids, and out-of-order completion. |
 | [`ch13-debugging-testing-verification/`](ch13-debugging-testing-verification/README.md) | Waveform/printf debugging, readable tests with functions and tags, internal-signal access via `BoringUtils`, fork/join, backends, assertions, and formal verification. |
 | [`ch14-design-of-a-processor/`](ch14-design-of-a-processor/README.md) | The Leros accumulator processor: ISA, an ALU with accumulator (tested vs. a Scala model), instruction decoder, and data memory; the FSMD datapath explained. |
-| [`ch15-a-risc-v-pipeline/`](ch15-a-risc-v-pipeline/README.md) | The Wildcat 3-stage pipelined RISC-V (RV32I): datapath as functions (ALU, decoder, register file), instruction ROM and CSRs, with the full `ThreeCats` CPU generated to Verilog. |
+| [`ch15-a-risc-v-pipeline/`](ch15-a-risc-v-pipeline/README.md) | The Wildcat 3-stage pipelined RISC-V (RV32I): datapath as functions (ALU, decoder, register file), instruction ROM, CSRs, and forwarding — with a hand-assembled program running through the complete `ThreeCats` CPU, which is generated to Verilog. |
 
 > **New to Scala?** Chisel is a Scala library, so the code is Scala. See
 > [`SCALA-NOTES.md`](SCALA-NOTES.md) for a compact reference to every Scala
