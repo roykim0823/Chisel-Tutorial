@@ -276,7 +276,7 @@ Click a chapter to open its walkthrough.
 
 | Chapter | What you'll build & run |
 |--------|--------------------------|
-| [`ch01-introduction/`](ch01-introduction/README.md) | A Scala "Hello World", then a blinking-LED hardware module; generate its SystemVerilog. |
+| [`ch01-introduction/`](ch01-introduction/README.md) | A Scala "Hello World", a runnable crash course in the Scala the whole tutorial uses, then a blinking-LED hardware module; generate its SystemVerilog. |
 | [`ch02-basic-components/`](ch02-basic-components/README.md) | Combinational logic, a multiplexer, registers, `Bundle`/`Vec`, and a 32×32 register file; run a test bench and generate SystemVerilog. |
 | [`ch03-build-and-testing/`](ch03-build-and-testing/README.md) | sbt build, packages, Verilog generation and tool flow; ScalaTest, ChiselTest (`poke`/`step`/`expect`), waveforms, and `printf` debugging. |
 | [`ch04-components/`](ch04-components/README.md) | Modules and ports, instantiating and connecting components, a counter from an adder + register, nested hierarchy, an ALU with `switch`/`is`, and the `<>` bulk-connect operator. |
@@ -289,14 +289,18 @@ Click a chapter to open its walkthrough.
 | [`ch11-example-designs/`](ch11-example-designs/README.md) | A bubble FIFO, generalized ready/valid FIFOs (five implementations, one test), and a modular UART with a loopback test. |
 | [`ch12-interconnect/`](ch12-interconnect/README.md) | On-chip bus concepts, a pipelined handshake (PipeCon), a counter IO device, and a memory-mapped bridge to a ready/valid stream; the same device rebuilt as a Wishbone and an AXI4-Lite slave, with a PipeCon→Wishbone bridge — plus an [AXI4 appendix](ch12-interconnect/APPENDIX-AXI4.md) on bursts, ids, and out-of-order completion. |
 | [`ch13-debugging-testing-verification/`](ch13-debugging-testing-verification/README.md) | Waveform/printf debugging, readable tests with functions and tags, internal-signal access via `BoringUtils`, fork/join, backends, assertions, and formal verification. |
-| [`ch14-design-of-a-processor/`](ch14-design-of-a-processor/README.md) | The Leros accumulator processor: ISA, an ALU with accumulator (tested vs. a Scala model), instruction decoder, and data memory; the FSMD datapath explained. |
+| [`ch14-design-of-a-processor/`](ch14-design-of-a-processor/README.md) | The Leros accumulator processor: ISA, an ALU with accumulator (tested vs. a Scala model), instruction decoder, and data memory; a two-pass assembler that runs at hardware-generation time, and the complete fetch/execute FSMD running five assembly programs. |
 | [`ch15-a-risc-v-pipeline/`](ch15-a-risc-v-pipeline/README.md) | The Wildcat 3-stage pipelined RISC-V (RV32I): datapath as functions (ALU, decoder, register file), instruction ROM, CSRs, and forwarding — with a hand-assembled program running through the complete `ThreeCats` CPU, which is generated to Verilog. |
 
-> **New to Scala?** Chisel is a Scala library, so the code is Scala. See
-> [`SCALA-NOTES.md`](SCALA-NOTES.md) for a compact reference to every Scala
-> language feature and idiom the chapters use — with real examples from the
-> tutorial. Read it once up front, then dip back in whenever a chapter uses
-> syntax you don't recognize.
+> **New to Scala?** Chisel is a Scala library, so the code is Scala. Start with
+> [**Chapter 1 §1.2, "A crash course in Scala"**](ch01-introduction/README.md#12-a-crash-course-in-scala) —
+> a runnable twenty-minute tour of exactly the Scala this tutorial uses
+> (`sbt "runMain ScalaIntro"` prints an example of every construct), ending with
+> the elaboration-vs-hardware distinction that everything else rests on. Then
+> keep [`SCALA-NOTES.md`](SCALA-NOTES.md) beside you as the reference for the
+> Scala the *later* chapters add — traits, generics, `case class`, pattern
+> matching, and the functional collection operators — with real examples from
+> the tutorial.
 
 > **Coming from Verilog or VHDL — or just want to see what Chisel built?**
 > [`SYSTEMVERILOG-NOTES.md`](SYSTEMVERILOG-NOTES.md) is the Chisel ↔

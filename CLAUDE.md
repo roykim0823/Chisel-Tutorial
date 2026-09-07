@@ -201,6 +201,36 @@ Instance[X]" error.
 When editing any backed level, re-run `sbt "runMain Generate"` and verify each
 labelled block still matches its file line-for-line.
 
+## Scala documentation: ch01 §1.2 vs. `SCALA-NOTES.md`
+
+The Scala material is split deliberately, and the split is load-bearing:
+
+- **`ch01-introduction/README.md` §1.2, "A crash course in Scala"** *teaches* the
+  language basics — `val`/`var`, inference, literals, expressions, `def`,
+  classes and objects, operators-as-methods, `apply`, `Seq`, ranges/`for`,
+  `while`, tuples, interpolation, `println`, packages, and the
+  elaboration-vs-hardware line. It is backed by a runnable
+  `src/main/scala/ScalaIntro.scala` (plus a namespace `object Constants`), and
+  **every output block in it is real captured `sbt "runMain ScalaIntro"`
+  output** — §1.2.19 holds the full run. Re-run it and re-paste if you touch the
+  file.
+- **`SCALA-NOTES.md`** is the *reference* for what the later chapters add:
+  traits, abstract classes, `private`, namespace objects (A), enums and
+  `case class` (B), generics (C), function literals and FP (D), the functional
+  collection operators (E), pattern matching and `Option` (F), multi-generator
+  `for` (G), `assert`/`require` (H), the ScalaTest DSL (I), and what the
+  tutorial does not use (J).
+
+Do not duplicate a construct across the two — teach it in ch01 §1.2 *or*
+document it in `SCALA-NOTES.md`, and link from the other side. Chapter "Scala
+note" callouts link to whichever file owns the construct. `ch10-hardware-generators`
+§10.1 "A little Scala" is the **book's own** refresher and stays as-is under the
+superset rule; it carries a pointer to ch01 §1.2.
+
+Anchors in both files are linked from ~11 files. After any renumbering, re-run
+an anchor check over every `*.md` (resolve each `](path#anchor)` against the
+target file's GitHub heading slugs) before considering the edit done.
+
 ## `SYSTEMVERILOG-NOTES.md`
 
 Root-level companion to `SCALA-NOTES.md`, structured the same way (lettered

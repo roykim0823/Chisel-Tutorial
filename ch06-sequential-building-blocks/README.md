@@ -260,15 +260,15 @@ class CounterTest extends AnyFlatSpec with ChiselScalatestTester with CountTest 
 ```
 
 *Scala note — the shared bench is a `trait` mixed in with `with`
-([§A.4](../SCALA-NOTES.md#a4-trait--mixed-in-with-with)), and its
+([§A.1](../SCALA-NOTES.md#a1-trait--mixed-in-with-with)), and its
 `def testFn[T <: Counter]` is a type parameter with an upper bound
-([§D.1](../SCALA-NOTES.md#d1-type-parameters-t-with-an-upper-bound-t--x)).*
+([§C.1](../SCALA-NOTES.md#c1-type-parameters-t-with-an-upper-bound-t--x)).*
 
 *Scala note — each `test(new WhenCounter(4)) { c => testFn(c, 4) }` passes a
 function literal using the `=>` arrow
-([§E.1](../SCALA-NOTES.md#e1-function-literals-lambdas-and-the--arrow)) that closes
+([§D.1](../SCALA-NOTES.md#d1-function-literals-lambdas-and-the--arrow)) that closes
 over the test's `var count`
-([§E.2](../SCALA-NOTES.md#e2-closures-over-test-state)).*
+([§D.2](../SCALA-NOTES.md#d2-nested-local-functions--closures)).*
 
 > **Line-by-line walkthrough:
 > [`reviews/CounterTest.md`](reviews/CounterTest.md)** — why `test(...)` takes

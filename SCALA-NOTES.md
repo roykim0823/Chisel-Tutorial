@@ -5,11 +5,22 @@ Chisel description you write (`Module`, `IO`, `when`, `:=`, `RegNext`, …) is
 just Scala code that, when it runs, *builds* a hardware graph. So to read the
 tutorial fluently you need a working feel for a handful of Scala constructs.
 
-This file is that feel: a compact reference to every Scala **language** feature
-and idiom used across the chapter projects (ch01–ch15), with an explanation and
-a real example copied from the tutorial. It is deliberately about *Scala itself*
-— not the Chisel API. Read it once up front, then come back whenever a chapter
-uses syntax you don't recognize.
+**Start with [Chapter 1 §1.2, "A crash course in Scala"](ch01-introduction/README.md#12-a-crash-course-in-scala).**
+That section is the runnable introduction to the language: values and variables,
+type inference, literals, expressions, methods, classes and objects, operators
+as method calls, `apply`, collections, loops, tuples, string interpolation,
+packages — and the elaboration-vs-hardware line that everything else depends on.
+It is where the basics are *taught*, with a program you can run
+(`sbt "runMain ScalaIntro"`) and real output for every construct.
+
+**This file picks up where that leaves off.** It is the reference for the Scala
+that the *later* chapters add: traits and abstract classes, `case class` and
+enumerations, type parameters and generics, function literals and the functional
+collection operators, pattern matching and `Option`, elaboration-time contracts,
+and the ScalaTest DSL. Every entry is deliberately about *Scala itself* — not the
+Chisel API — and carries a real example copied from the tutorial. Read Chapter 1
+§1.2 once up front, then come back here whenever a chapter uses syntax you don't
+recognize.
 
 > *Conventions:* file paths are relative to the tutorial root. `chNN` refers to
 > the chapter folder (e.g. `ch06` = `ch06-sequential-building-blocks/`). Within
@@ -19,12 +30,13 @@ uses syntax you don't recognize.
 > draw on *Programming in Scala* (5th ed., Odersky, Spoon, Venners & Sommers),
 > the definitive language reference, adapted to the hardware setting.
 
-**The one idea to internalize first:** most Scala code here runs **once, at
-*elaboration* time**, to construct hardware — it is not itself hardware. A Scala
-`if`, `for`, `val`, or `map` is a *build-time* instruction ("emit this wire,
-repeat this connection 32 times"). The hardware equivalents are the Chisel
-constructs (`when`, `Mux`, `Vec`, `Reg`). Keeping this distinction straight is
-the single biggest hurdle for newcomers — see [§I](#i-scala-vs-chisel-the-elaboration-vs-hardware-line).
+**The one idea to internalize first** is taught in Chapter 1 and worth repeating:
+most Scala code here runs **once, at *elaboration* time**, to construct hardware —
+it is not itself hardware. A Scala `if`, `for`, `val`, or `map` is a *build-time*
+instruction ("emit this wire, repeat this connection 32 times"). The hardware
+equivalents are the Chisel constructs (`when`, `Mux`, `Vec`, `Reg`). Keeping this
+distinction straight is the single biggest hurdle for newcomers — see
+[ch01 §1.2.18](ch01-introduction/README.md#1218-scala-vs-chisel-the-elaboration-vs-hardware-line).
 
 Where a chapter README already has a "Scala note" callout, this file points to
 it rather than repeating it.
@@ -33,87 +45,52 @@ it rather than repeating it.
 
 ## Contents
 
-- [A. Top-level structure: packages, classes, objects, traits](#a-top-level-structure-packages-classes-objects-traits)
+**The basics live in Chapter 1** — [§1.2 A crash course in Scala](ch01-introduction/README.md#12-a-crash-course-in-scala):
+[`val`/`var`](ch01-introduction/README.md#121-values-and-variables-val-vs-var) ·
+[type inference](ch01-introduction/README.md#122-types-are-inferred-but-you-can-state-them) ·
+[literals](ch01-introduction/README.md#123-literals) ·
+[expressions](ch01-introduction/README.md#124-everything-is-an-expression) ·
+[`def`](ch01-introduction/README.md#125-methods-def) ·
+[named & default arguments](ch01-introduction/README.md#126-named-and-default-arguments) ·
+[classes](ch01-introduction/README.md#127-classes-new-and-extends) ·
+[`object`](ch01-introduction/README.md#128-singletons-object-and-the-program-entry-point) ·
+[operators](ch01-introduction/README.md#129-operators-are-method-calls) ·
+[`apply`](ch01-introduction/README.md#1210-apply-the-one-method-name-you-may-omit) ·
+[`Seq`/`List`/`Array`](ch01-introduction/README.md#1211-collections-seq-list-array) ·
+[ranges & `for`](ch01-introduction/README.md#1212-ranges-and-the-for-loop) ·
+[`while`](ch01-introduction/README.md#1213-while) ·
+[tuples](ch01-introduction/README.md#1214-tuples) ·
+[string interpolation](ch01-introduction/README.md#1215-string-interpolation) ·
+[`println`](ch01-introduction/README.md#1216-println-and-the-standard-library) ·
+[packages & imports](ch01-introduction/README.md#1217-packages-and-imports) ·
+[elaboration vs. hardware](ch01-introduction/README.md#1218-scala-vs-chisel-the-elaboration-vs-hardware-line)
+
+**Everything beyond the basics is here:**
+
+- [A. Structure & reuse: traits, abstract classes, encapsulation, namespaces](#a-structure--reuse-traits-abstract-classes-encapsulation-namespaces)
 - [B. Data & enumeration types](#b-data--enumeration-types)
-- [C. Values, variables & methods](#c-values-variables--methods)
-- [D. Types & generics](#d-types--generics)
-- [E. Functions & functional programming](#e-functions--functional-programming)
-- [F. Collections](#f-collections)
-- [G. Pattern matching, tuples & Option](#g-pattern-matching-tuples--option)
-- [H. Control flow](#h-control-flow)
-- [I. Scala vs. Chisel: the elaboration-vs-hardware line](#i-scala-vs-chisel-the-elaboration-vs-hardware-line)
-- [J. Operators, literals & runtime idioms](#j-operators-literals--runtime-idioms)
-- [K. ScalaTest DSL (reads like English, is really Scala)](#k-scalatest-dsl-reads-like-english-is-really-scala)
-- [L. What the tutorial does *not* use](#l-what-the-tutorial-does-not-use)
+- [C. Types & generics](#c-types--generics)
+- [D. Functions & functional programming](#d-functions--functional-programming)
+- [E. Collections: the functional toolkit](#e-collections-the-functional-toolkit)
+- [F. Pattern matching & `Option`](#f-pattern-matching--option)
+- [G. Control flow beyond the basics](#g-control-flow-beyond-the-basics)
+- [H. Elaboration-time contracts: `assert` & `require`](#h-elaboration-time-contracts-assert--require)
+- [I. ScalaTest DSL (reads like English, is really Scala)](#i-scalatest-dsl-reads-like-english-is-really-scala)
+- [J. What the tutorial does *not* use](#j-what-the-tutorial-does-not-use)
 - [Where the chapters already explain Scala](#where-the-chapters-already-explain-scala)
 
 ---
 
-## A. Top-level structure: packages, classes, objects, traits
+## A. Structure & reuse: traits, abstract classes, encapsulation, namespaces
 
-### A.1 `object X extends App`
+Chapter 1 introduced the two containers you meet on day one — the
+[`class`](ch01-introduction/README.md#127-classes-new-and-extends) and the
+[`object`](ch01-introduction/README.md#128-singletons-object-and-the-program-entry-point).
+This section covers the rest of Scala's structuring vocabulary, which the
+tutorial reaches for once designs grow past a single module.
 
-*(ch01)* — a program entry point. Scala classes have
-**no** static members; an `object` is Scala's replacement for Java-style
-statics — a lazily-created singleton (exactly one instance, no `new`). When an
-`object` shares its name with a class in the same file it is that class's
-*companion*, and the two may freely access each other's private members. An
-application's entry point is a standalone object with a `main(args: Array[String]): Unit`
-method; mixing in the library trait `App` generates that `main` for you, so the
-object body simply *is* the program. In this tutorial the pattern names the
-generators (`Generate`, `HelloScala`) that elaborate a module and emit its
-Verilog — the software wrapper *around* your hardware, not hardware itself.
+### A.1 `trait` … mixed in with `with`
 
-`ch01-introduction/src/main/scala/HelloScala.scala`
-
-```scala
-object HelloScala extends App {
-  println("Hello Chisel World!")
-}
-```
-
-### A.2 `class` / `extends`
-
-*(ch01)* — a class is a blueprint for objects; you
-instantiate it with `new`, and inside it you place *members*: fields (declared
-with `val`/`var`) that hold each instance's state, and methods (declared with
-`def`) that operate on that state. Every instance gets its own copy of the
-fields. An `extends` clause makes one class a subclass of another: it inherits
-all the superclass's non-private members **and** becomes a subtype of it
-(omitting `extends` implicitly extends `AnyRef`). A Chisel component is *just* a
-class that `extends Module`; its constructor body runs at elaboration to build
-the circuit.
-
-`ch01-introduction/src/main/scala/Hello.scala`
-
-```scala
-class Hello extends Module {
-  val io = IO(new Bundle { ... })
-}
-```
-
-### A.3 `package` and `import`
-
-*(ch03)* — a `package` clause at the top of a file
-places its code under a namespace (mirroring the folder tree) and signals to the
-compiler that code in the same package is related, so names don't collide across
-a large design. `import` then lets you refer to package or object members by
-their simple names. Scala's imports are more flexible than Java's: they may
-appear anywhere (not just at the top), may import from **any object** and not
-only packages, and may rename or hide individual members. The wildcard `_`
-imports everything; importing an object's members (`import Constants._`) lets you
-write `NOP` instead of `Constants.NOP`.
-
-`ch03-build-and-testing/src/main/scala/usepack.scala`
-
-```scala
-import mypack.Abc      // single name
-import mypack._        // wildcard: everything in the package
-// ... or fully-qualified, with no import at all:
-val x = new mypack.Abc()
-```
-
-### A.4 `trait` … mixed in with `with`
 
 *(ch06)* — a trait is Scala's fundamental
 unit of code reuse: it encapsulates method and field definitions that you *mix
@@ -134,7 +111,8 @@ trait CountTest {
 class CounterTest extends AnyFlatSpec with ChiselScalatestTester with CountTest
 ```
 
-### A.5 `abstract class` with constructor parameters
+### A.2 `abstract class` with constructor parameters
+
 
 *(ch10)* — a class that has an
 abstract member (e.g. a method with no body) must itself be declared `abstract`
@@ -152,7 +130,8 @@ modules must implement (e.g. every "ticker" has the same I/O).
 abstract class Ticker(n: Int) extends Module { ... }
 ```
 
-### A.6 `private` members
+### A.3 `private` members
+
 
 *(ch11)* — placing `private` in front of a field, method,
 or nested class makes it accessible only inside the body of the class or object
@@ -168,7 +147,8 @@ private class Buffer() extends Module { ... }
 class FifoIO[T <: Data](private val gen: T) extends Bundle { ... }
 ```
 
-### A.7 `object` as a namespace / companion object
+### A.4 `object` as a namespace / companion object
+
 
 *(ch14)* — because an `object` is
 a singleton with no statics elsewhere in the language, it's the natural home for
@@ -232,14 +212,18 @@ tutorial pins Scala 2.13, so the `object` is required here.
 
 ---
 
+---
+
 ## B. Data & enumeration types
 
-Where [§A](#a-top-level-structure-packages-classes-objects-traits) covers the
+
+Where [§A](#a-structure--reuse-traits-abstract-classes-encapsulation-namespaces) covers the
 *containers* that organize a program, this section covers declarations whose job
 is to model **values** — a bundle of typed fields, or a finite set of named
 constants.
 
 ### B.1 Enumerations via a nested `object` (`ChiselEnum`)
+
 
 *(ch08)* — an enumeration
 is a type restricted to a **finite set of named values**. You first meet one in
@@ -276,11 +260,12 @@ import State._                      // then refer to `green`, `orange`, `red` ba
 > **single shared type** — inherently a singleton — so `object`, Scala's built-in
 > singleton with no `new`, is the exact fit. It's the same "Scala classes have no
 > statics; an `object` replaces them" point from
-> [§A](#a-top-level-structure-packages-classes-objects-traits): the state
+> [§A](#a-structure--reuse-traits-abstract-classes-encapsulation-namespaces): the state
 > constants are the shared, static-like values that belong on one singleton, and
 > being a singleton is what lets `import State._` bring them into scope bare.
 
 ### B.2 `case class`
+
 
 *(ch10)* — a lightweight, immutable data holder. The `case`
 modifier tells the compiler to generate a bundle of boilerplate: a companion
@@ -300,6 +285,7 @@ case class Config(txDepth: Int, rxDepth: Int, width: Int)
 ```
 
 ### B.3 Scala's `Enumeration` + `type` alias
+
 
 *(ch15)* — Scala's *standard library*
 offers its own enumeration, distinct from Chisel's `ChiselEnum` above: you extend
@@ -322,160 +308,13 @@ object InstrType extends Enumeration {
 
 ---
 
-## C. Values, variables & methods
-
-### C.1 `val` vs `var`
-
-*(ch01 / ch06)* — Scala has two kinds of variable. A `val`,
-once initialized, can **never** be reassigned (like a Java `final`); a `var` can
-be reassigned throughout its life and supports `+=`/`-=`. Scala style prefers
-`val`, and in *hardware-description* code everything is a `val` — a `val` *names
-a piece of the circuit*, it doesn't "vary." (Reassignment is really a get/set
-pair: every non-private `var` member of an object implicitly gets a matching
-getter and setter.) Mutable `var` shows up in this tutorial **only in test
-benches**, where it accumulates an expected value across simulated clock cycles —
-software bookkeeping, not hardware.
-
-`ch06-sequential-building-blocks/src/test/scala/CounterTest.scala`
-
-```scala
-var count = -1
-// ...later, inside the cycle loop:
-count -= 1
-```
-
-### C.2 `if` as an expression
-
-*(ch02)* — in Scala `if`/`else` *is an expression*: it
-tests a condition and evaluates to the value of whichever branch runs, so it can
-sit on the right-hand side of `=` (there's no ternary `?:` because `if` already
-does that job). Initializing a `val` directly from an `if` — rather than
-declaring a `var` and mutating it — is the functional idiom and signals to
-readers that the value never changes. Here it decides, **at elaboration time**,
-whether an optional debug port exists at all. Contrast Chisel's `when`, which
-builds a runtime mux — see [§I](#i-scala-vs-chisel-the-elaboration-vs-hardware-line).
-
-`ch02-basic-components/src/main/scala/RegisterFile.scala`
-
-```scala
-val dbgPort = if (debug) Some(Output(Vec(32, UInt(32.W)))) else None
-```
-
-### C.3 `new` and type inference
-
-*(ch02 / ch03)* — `new` instantiates a class
-(`new mypack.Abc()`); `case class`es and factory objects let you skip it. Scala
-also *infers* the type of most `val`s from the right-hand side. Its inference is
-**flow-based**: for a call `m(args)`, if the method `m`'s type is already known,
-that expected type flows *into* inferring the arguments (for instance, the
-parameter types of a function literal you pass in). So a very terse literal can
-be inferred where the surrounding type is known — but not when the type would
-have to flow the other way. (The ch02 README calls type inference out too.)
-
-`ch03-build-and-testing/src/main/scala/usepack.scala`
-
-```scala
-val x = new mypack.Abc()   // type Abc inferred; no `: Abc` needed
-```
-
-### C.4 `def` methods
-
-*(ch10)* — a `def` starts with the name, a parenthesized
-parameter list where **every parameter must carry an explicit type** (the
-compiler does *not* infer parameter types), an optional result type after a
-colon, then `=` and the body. The `=` reflects the functional view that a method
-defines an expression yielding a value; `Unit` is the "nothing useful" result
-type (like `void`). A method is simply a function defined as a member of some
-object. In Chisel a `def` that returns hardware (`UInt`, a `Bundle`, a tuple of
-signals) is a *hardware generator* — calling it stamps out that sub-circuit.
-
-`ch11-example-designs/src/main/scala/fifo/fifo.scala`
-
-```scala
-def counter(depth: Int, incr: Bool): (UInt, UInt) = { ... }
-```
-
-`ch14-design-of-a-processor/src/test/scala/leros/AluAccuTest.scala`
-
-```scala
-def testOne(a: Int, b: Int, fun: Int): Unit = { ... }
-```
-
-### C.5 Block-as-expression (implicit return)
-
-*(ch10)* — a `{ … }` block *is* an
-expression: it evaluates to its **last expression**. Idiomatic Scala has no
-`return` keyword — a method's result is simply the value its body ends with. Here
-the generator builds a wire, conditionally drives it, and yields it as the
-result.
-
-`ch10-hardware-generators/src/main/scala/ParamFunc.scala`
-
-```scala
-def myMux[T <: Data](sel: Bool, tPath: T, fPath: T): T = {
-  val ret = WireDefault(fPath)
-  when(sel) { ret := tPath }
-  ret                        // <- this value is the method's result
-}
-```
-
-### C.6 Named arguments
-
-*(ch11)* — at a call site you may pass arguments by writing
-each parameter's name and `=` before its value, which lets you supply them in a
-different order than declared (any positional arguments must come first). This
-makes calls with several same-typed parameters self-documenting —
-`frequency = 1000, baudRate = 10` can't be swapped by mistake.
-
-`ch11-example-designs/src/test/scala/uart/UartTest.scala`
-
-```scala
-test(new UartLoopback(frequency = 1000, baudRate = 10))
-```
-
-### C.7 Default arguments
-
-*(ch12)* — a definition can give a parameter a fallback
-value, so callers who omit that argument get the default. Common for "usually 1"
-step counts and "off by default" feature flags, and frequently combined with
-named arguments to set just the one you care about.
-
-`ch12-interconnect/src/test/scala/CounterDeviceTest.scala`
-
-```scala
-def step(n: Int = 1) = dut.clock.step(n)   // step() means step(1)
-```
-
-`ch12-interconnect/src/main/scala/interconnect.scala`
-
-```scala
-class MemMappedRV[T <: Data](gen: T, block: Boolean = false) extends Module
-```
-
-### C.8 Nested (local) functions & closures
-
-*(ch12)* — a `def` defined inside another
-`def` or block is a *local function*, visible only there; it lets you factor code
-into small helpers without polluting the namespace or exposing them to clients. A
-**closure** is the function value formed from a literal that references *free*
-variables (ones not among its own parameters) — it "closes over" their bindings.
-Crucially, a Scala closure captures the **variables themselves, not a snapshot**,
-so later changes are seen by the closure and vice versa. The tutorial's tests
-define `read`/`write` helpers that capture the running `dut`.
-
-`ch12-interconnect/src/test/scala/CounterDeviceTest.scala`
-
-```scala
-// defined inside the test block; both capture `dut` from the enclosing scope:
-def read(addr: Int)            = { ... dut.io ... }
-def write(addr: Int, data: Int) = { ... dut.io ... }
-```
-
 ---
 
-## D. Types & generics
+## C. Types & generics
 
-### D.1 Type parameters `[T]` with an upper bound `[T <: X]`
+
+### C.1 Type parameters `[T]` with an upper bound `[T <: X]`
+
 
 *(ch06)* — a *generic* (type parameter) is a placeholder for a **type**, written
 in square brackets `[ ]` just as value parameters are written in parentheses
@@ -510,7 +349,8 @@ def testFn[T <: Counter](c: T, n: Int) = { ... }
 class BubbleFifo[T <: Data](gen: T, depth: Int) extends Fifo(gen, depth) { ... }
 ```
 
-### D.2 Wildcard type argument `[_ <: Data]`
+### C.2 Wildcard type argument `[_ <: Data]`
+
 
 *(ch11)* — when you don't care *which*
 subtype fills a type parameter, `_` is an anonymous placeholder: `Fifo[_ <: Data]`
@@ -523,7 +363,8 @@ FIFO regardless of payload.
 def testFn[T <: Fifo[_ <: Data]](dut: T) = { ... }
 ```
 
-### D.3 `type` alias
+### C.3 `type` alias
+
 
 *(ch15)* — `type Name = Existing` introduces a synonym for an
 existing type, to abbreviate a verbose type or clarify intent. (See the
@@ -531,9 +372,13 @@ existing type, to abbreviate a verbose type or clarify intent. (See the
 
 ---
 
-## E. Functions & functional programming
+---
 
-### E.1 Function literals (lambdas) and the `=>` arrow
+## D. Functions & functional programming
+
+
+### D.1 Function literals (lambdas) and the `=>` arrow
+
 
 *(ch06)* — Scala has *first-class functions*: you write a function as an unnamed
 literal (`(x: Int) => x + 1`) and pass it around as a value. The **`=>`** is the
@@ -554,7 +399,7 @@ expected type "targets" the inference).
 
 Don't confuse `=>` with the neighbouring arrows: **`<-`** in
 `for (_ <- 0 until n)` is the for-comprehension *generator* ("drawn from"), and
-**`<:`** is the [subtype bound](#d1-type-parameters-t-with-an-upper-bound-t--x)
+**`<:`** is the [subtype bound](#c1-type-parameters-t-with-an-upper-bound-t--x)
 from the entry above. The `=>` arrow also shows up in `match` cases
 (`case 0 => ...`) — same idea: left of the arrow is the input, right of it is the
 result.
@@ -573,15 +418,33 @@ Two-parameter literal (used to fold a Chisel `Vec`):
 vec.reduceTree((x, y) => Mux(x < y, x, y))
 ```
 
-### E.2 Closures over test state
+### D.2 Nested (local) functions & closures
 
-*(ch06)* — the function you hand to `test` closes
+*(ch06 / ch12)* — a `def` defined inside another
+`def` or block is a *local function*, visible only there; it lets you factor code
+into small helpers without polluting the namespace or exposing them to clients. A
+**closure** is the function value formed from a literal that references *free*
+variables (ones not among its own parameters) — it "closes over" their bindings.
+Crucially, a Scala closure captures the **variables themselves, not a snapshot**,
+so later changes are seen by the closure and vice versa. The tutorial's tests
+define `read`/`write` helpers that capture the running `dut`.
+
+`ch12-interconnect/src/test/scala/CounterDeviceTest.scala`
+
+```scala
+// defined inside the test block; both capture `dut` from the enclosing scope:
+def read(addr: Int)            = { ... dut.io ... }
+def write(addr: Int, data: Int) = { ... dut.io ... }
+```
+
+**Closures over test state.** The function you hand to `test` closes
 over `val`s and `var`s declared just outside it, so the body can read the DUT and
-update expected-value bookkeeping (the `var count` from [§C.1](#c1-val-vs-var))
+update expected-value bookkeeping (the `var count` from [§1.2.1](ch01-introduction/README.md#121-values-and-variables-val-vs-var))
 across cycles. Because closures capture the variable, not a copy, each iteration
 sees the updated count.
 
-### E.3 The `_` placeholder (point-free style)
+### D.3 The `_` placeholder (point-free style)
+
 
 *(ch10)* — inside a function literal,
 each `_` stands for a successive parameter, filled in at each invocation. So
@@ -604,7 +467,8 @@ val text = VecInit(msg.map(_.U))   // each Char -> a Chisel UInt literal
 > The **ch10 README (§10.6, ~lines 584–607)** explains function-literal syntax
 > and the `_` wildcard in prose.
 
-### E.4 Higher-order functions
+### D.4 Higher-order functions
+
 
 *(ch10)* — a function that takes (or returns) another
 function. Because the *varying* part of an algorithm can be passed in as a
@@ -625,52 +489,19 @@ val sum = vec.reduce(add)      // pass the function `add` itself
 
 ---
 
-## F. Collections
+---
 
-Scala collections drive *generation*: you build a Scala `Seq`/`List` at
-elaboration time and turn it into hardware with `VecInit`, `for`, `map`, etc.
+## E. Collections: the functional toolkit
 
-### F.1 `Seq` / `List` / `Array` / `IndexedSeq` and builders
+Chapter 1 covered the collection *types* themselves —
+[`Seq` / `List` / `Array`](ch01-introduction/README.md#1211-collections-seq-list-array)
+and [ranges](ch01-introduction/README.md#1212-ranges-and-the-for-loop). This
+section is about the operations you apply to them. Scala collections drive
+*generation*: you build a Scala `Seq`/`List` at elaboration time and turn it into
+hardware with `VecInit`, `for`, `map`, etc.
 
-*(ch02)* — *sequence*
-types hold data lined up in order, so you can ask for elements by position. The
-default `List` is an immutable linked list: fast to add/remove at the front and
-great for pattern matching, but *not* fast for arbitrary-index access. You most
-often create one by passing the initial elements to the companion's `apply`
-factory (`List(...)`, `Seq(...)`, `Array(...)`); `Seq.fill(n)(x)` builds `n`
-copies of `x`, while `Array.fill(n){ block }` *runs the block* `n` times (e.g. to
-instantiate `n` fresh sub-modules). `Array` is special — it maps one-to-one onto
-a Java array yet is still generic and `Seq`-compatible. You use these to describe
-*how many* of something to generate.
+### E.1 `map` / `foreach` / `reduce` / `zip` / `zipWithIndex`
 
-`ch02-basic-components/src/main/scala/RegisterFile.scala`
-
-```scala
-val regfile = RegInit(VecInit(Seq.fill(32)(0.U(32.W))))
-```
-
-`ch11-example-designs/src/main/scala/BubbleFifo.scala`
-
-```scala
-val buffers = Array.fill(depth) { Module(new FifoRegister(size)) }
-```
-
-### F.2 Ranges: `until` (exclusive) vs `to` (inclusive)
-
-*(ch03 / ch05)* — a `Range`
-is a collection of evenly-spaced integers, written `1 to 5` (inclusive) or
-`1 until 5` (excluding the upper bound). It's what almost every `for` header
-iterates over. The exclusive/inclusive choice is a frequent off-by-one source —
-and, where you can, iterating a collection directly beats indexing through a
-range, because it's shorter and sidesteps the off-by-one entirely.
-
-`ch05-combinational-building-blocks/src/main/scala/arbiter.scala`
-
-```scala
-for (i <- 1 until n) { ... }
-```
-
-### F.3 `map` / `foreach` / `reduce` / `zip` / `zipWithIndex`
 
 *(ch10)* — the
 functional toolkit shared by Scala collections *and* Chisel `Vec`s. Where
@@ -688,7 +519,8 @@ element with its position. (A `for`-`yield` comprehension compiles down to a
 Seq(3, 2, 0, 9, 1).zipWithIndex.foreach { case (v, i) => dut.io.in(i).poke(v.U) }
 ```
 
-### F.4 String as a `Seq[Char]`
+### E.2 String as a `Seq[Char]`
+
 
 *(ch10)* — a `String` isn't literally a sequence, but
 an implicit conversion wraps it (as a `WrappedString`, a kind of `IndexedSeq`) so
@@ -704,7 +536,8 @@ val text = VecInit(msg.map(_.U))
 val len  = msg.length.U
 ```
 
-### F.5 Conversions (`.toList`, `.toIndexedSeq`, `.toInt`, `.toLong`)
+### E.3 Conversions (`.toList`, `.toIndexedSeq`, `.toInt`, `.toLong`)
+
 
 *(ch14)* —
 collections offer a family of `toArray`/`toList`/`toSeq`/`toIndexedSeq`/`toSet`/
@@ -721,9 +554,16 @@ usually copies every element, so it can be slow on large collections.
 
 ---
 
-## G. Pattern matching, tuples & Option
+---
 
-### G.1 `Option` / `Some` / `None` / `.get`
+## F. Pattern matching & `Option`
+
+[Tuples](ch01-introduction/README.md#1214-tuples) — the third member of this
+family — are in Chapter 1, because a generator that returns two signals needs
+them immediately.
+
+### F.1 `Option` / `Some` / `None` / `.get`
+
 
 *(ch02)* — Scala's null-free "maybe a
 value." An `Option` is either `Some(x)` (present) or the `None` singleton
@@ -742,25 +582,8 @@ val dbgPort = if (debug) Some(Output(Vec(32, UInt(32.W)))) else None
 if (debug) { io.dbgPort.get := regfile }
 ```
 
-### G.2 Tuples
+### F.2 Pattern-matching in a lambda
 
-*(ch10)* — a tuple combines a **fixed number** of items so you can pass
-them around as a whole; unlike a list its elements may have **different types**,
-which makes it ideal for returning several values from a method without declaring
-a class. Build one with comma-separated values in parentheses, read parts with
-`._1` / `._2`, or destructure with a pattern (`val (x, y) = …`). Its type records
-both the count and the element types — `(99, "x")` is a `Tuple2[Int, String]`.
-Perfect for a generator `def` that returns, say, a counter value *and* its wrap
-flag.
-
-`ch10-hardware-generators/src/main/scala/functional.scala`
-
-```scala
-def compare(a: UInt, b: UInt) = { ...; (equ, gt) }   // returns a 2-tuple
-val (equ, gt) = compare(io.a, io.b)                  // destructure it
-```
-
-### G.3 Pattern-matching in a lambda
 
 *(ch10)* — patterns are allowed well beyond a
 standalone `match`. A sequence of `case` clauses in braces can be used anywhere a
@@ -775,7 +598,8 @@ binding the tuple's parts to names. Common right after `zipWithIndex`.
 Seq(3, 2, 0, 9, 1).zipWithIndex.foreach { case (v, i) => dut.io.in(i).poke(v.U) }
 ```
 
-### G.4 `match` / `case` / wildcard `case _`
+### F.3 `match` / `case` / wildcard `case _`
+
 
 *(ch14)* — a `match` selects among
 alternatives using patterns. It's like a `switch` but far more general: it
@@ -798,49 +622,16 @@ op match {
 
 ---
 
-## H. Control flow
+---
 
-### H.1 `for` over a range
+## G. Control flow beyond the basics
 
-*(ch03 / ch05)* — the workhorse loop. A generator
-`x <- coll` binds a fresh `val` to each element of *any* collection in turn and
-runs the body; at elaboration it *unrolls*, emitting the body's hardware (or
-running the test action) once per iteration. Nested loops can be written with two
-generators in one header, separated by `;`, which reads as an outer loop over an
-inner loop.
+The [`for` loop](ch01-introduction/README.md#1212-ranges-and-the-for-loop) and
+the [`while` loop](ch01-introduction/README.md#1213-while) are in Chapter 1. One
+variation shows up only in the later chapters.
 
-`ch03-build-and-testing/src/test/scala/testing.scala` (nested form)
+### G.1 Multi-generator `for`
 
-```scala
-for (a <- 0 until 4) {
-  for (b <- 0 until 4) { ... }
-}
-```
-
-`ch05-combinational-building-blocks/src/main/scala/arbiter.scala`
-
-```scala
-for (i <- 1 until n) { ... }
-```
-
-### H.2 `while` loop
-
-*(ch11 / ch12)* — the classic pre-test loop: it re-runs its body
-as long as the condition holds. It's called a "loop" rather than an expression
-because it yields no useful value (its result type is `Unit`), and it's really
-only needed where mutable state (`var`s) is involved — the book suggests looking
-for a way to avoid it when there's no strong reason. In test benches it runs the
-simulation until a hardware condition holds — e.g. step the clock until an `ack`
-appears (with a guard counter to avoid hanging). `.peekBoolean()` reads the DUT's
-current simulated value.
-
-`ch12-interconnect/src/test/scala/CounterDeviceTest.scala`
-
-```scala
-while (!dut.io.ack.peekBoolean()) step()
-```
-
-### H.3 Multi-generator `for`
 
 *(ch14)* — several `<-` generators in one `for` header,
 separated by `;`, iterate as nested loops — here sweeping every ALU operation ×
@@ -854,83 +645,16 @@ for (fun <- 0 to 7; a <- values; b <- values) testOne(a, b, fun)
 
 ---
 
-## I. Scala vs. Chisel: the elaboration-vs-hardware line
-
-This is the concept that trips up every newcomer, so it gets its own section.
-Your Scala program **runs once** to *build* a circuit; the circuit then runs
-forever in hardware. Scala control flow shapes the circuit at build time; Chisel
-control flow *is* circuitry.
-
-| Scala (build time, runs once) | Chisel (hardware, runs every cycle) |
-|---|---|
-| `if (debug) ... else ...` — *decides whether to emit* hardware | `when(sel) { ... } .otherwise { ... }` — emits a **mux** that selects at runtime |
-| `for (i <- 0 until 32)` — *unrolls*, emitting the body 32× | a counter register that counts at runtime |
-| `val x = a + b` (Scala `Int`) — computed by the compiler | `val x = a + b` (Chisel `UInt`) — an **adder** in silicon |
-| `var` accumulating a Scala list | a `Reg` accumulating a value each clock |
-
-The **ch05 README (~line 121)** has a "Scala note" on exactly this — *"Why
-`when` and not Scala's `if`?"*. The short answer: a Scala `if` picks **one**
-branch to build; a `when` builds a multiplexer that chooses **at runtime**. Use
-Scala `if`/`for` to *parameterize and generate* hardware; use `when`/`Mux`/`Vec`
-for behaviour that varies while the chip is running.
-
-`ch02-basic-components/src/main/scala/RegisterFile.scala` (elaboration-time `if`
-that adds a port only in debug builds):
-
-```scala
-if (debug) { io.dbgPort.get := regfile }
-```
-
-For a striking parallel, *Programming in Scala* itself builds a **digital-circuit
-simulator** as an embedded Scala DSL: wires carry boolean signals and *gate
-boxes* (inverter, and-gate, or-gate — enough to build any circuit) transform
-them. Its gate constructors are named as **nouns** and build gates as a *side
-effect* rather than returning them, so the code reads as a *description* of a
-circuit rather than a sequence of build actions — exactly the mindset Chisel asks
-of you.
-
 ---
 
-## J. Operators, literals & runtime idioms
+## H. Elaboration-time contracts: `assert` & `require`
 
-### J.1 Infix method / operator notation & precedence
+Both of these run on the JVM while your generator is building the circuit, not on
+the chip afterwards — they check *your parameters and your Scala model*, and they
+are distinct from Chisel's hardware `assert`, which checks during simulation.
 
-*(ch02)* — operators aren't a
-special language feature in Scala; they're ordinary **method calls** in nicer
-syntax. `1 + 2` literally means `1.+(2)`, and *any* method taking a single
-argument can be written infix without a dot — so `a & b` is `a.&(b)`, and
-Chisel's `##` (bit concatenation) is just a method used infix. Since there are no
-built-in operators, precedence is decided by the operator's **first character**
-(one starting with `*` binds tighter than one starting with `+`), and most are
-left-associative — similar to but not identical to Java/C, so parenthesize when
-unsure. You can even define your own operators simply by naming methods with
-operator characters (which is how a Chisel type gets `+`, `&`, `##`, …).
+### H.1 `assert` (Scala)
 
-`ch02-basic-components/src/main/scala/Logic.scala`
-
-```scala
-val logic = (a & b) | c
-val word  = highByte ## lowByte
-```
-
-### J.2 Literals
-
-*(ch02)* — a literal writes a constant value directly in code; all of
-Scala's basic types have literal forms. A character literal is a Unicode
-character in single quotes (`'A'`), or `\u` followed by four hex digits, or an
-escape sequence. One gotcha: Scala has **no octal literals**, so an integer that
-starts with `0` won't compile. Hexadecimal `0x00`, a `Long` via the `L` suffix
-(`0x00ffffffffL`), `Double` like `100.0`, and underscores as digit separators are
-all fine. The suffix `.U`/`.S`/`.B`/`.W` then lifts a Scala literal into a Chisel
-value/width.
-
-`ch02-basic-components/src/main/scala/Logic.scala`
-
-```scala
-val aChar = 'A'.U    // char literal, then made a Chisel UInt
-```
-
-### J.3 `assert` (Scala)
 
 *(ch10)* — the predefined `assert` method (from `Predef`)
 throws an `AssertionError` when its condition is false; a two-argument form
@@ -946,7 +670,8 @@ runtime data.
 assert(txDepth > 0 && rxDepth > 0 && width > 0, "parameters must be larger than 0")
 ```
 
-### J.4 `require`
+### H.2 `require`
+
 
 *(ch11)* — a *precondition* is a constraint on the values passed into
 a method or constructor: something the caller must satisfy. You enforce one with
@@ -961,107 +686,13 @@ hardware is built, so the object is valid from the moment it exists.
 require(depth > 0, "Number of buffer elements needs to be larger than 0")
 ```
 
-### J.5 String interpolation `s"…"`
-
-*(ch12)* — when an identifier sits immediately
-before a string literal's opening quote, Scala applies that *interpolator*. The
-`s` interpolator evaluates each `$`-prefixed expression (use braces `${…}` for
-anything beyond a bare identifier), calls `toString`, and splices in the result;
-`f` allows `printf`-style format specifiers, and `raw` skips escape processing.
-It's a concise, readable alternative to concatenation, implemented by a
-compile-time rewrite (and you can define your own interpolators). Used here to
-build a descriptive assertion message.
-
-`ch12-interconnect/src/test/scala/CounterDeviceTest.scala`
-
-```scala
-assert(read(i * 4) < 10, s"counter $i just started")
-```
-
-### J.6 `println` and the standard library
-
-*(ch01, ch14)* — plain Scala output
-(`println` in `HelloScala`) and ordinary stdlib utilities such as
-`scala.util.Random.nextInt()` for randomized test vectors are all available in
-generators and tests.
-
-### J.7 `apply`: the one method name you may omit
-
-*(ch01 onwards)* — `apply` is a piece of syntactic sugar that lets an object be
-*called like a function*. When you follow a *value* (as opposed to a method
-name) with parentheses, `obj(args)`, the compiler translates it into
-`obj.apply(args)` behind the scenes: the parentheses are not built-in call
-syntax, they are a silent method invocation. `apply` is the single method name
-Scala lets you drop this way — every other method must still be named in full
-(`obj.foo(args)`).
-
-**The reason the language has this rule is unification.** In Scala a function is
-itself an object: a value of type `A => B` is really an instance of the trait
-`Function1[A, B]`, whose one member is a method called `apply`
-([§E.1](#e1-function-literals-lambdas-and-the--arrow)). Without the sugar,
-calling a function would mean writing `f.apply(x)`. By rewriting `f(x)` into
-`f.apply(x)`, Scala lets a plain function value be invoked with ordinary call
-syntax — and because the same rewrite applies to *any* value, not just
-functions, an arbitrary object can opt into that syntax simply by defining an
-`apply` method. That is how libraries make their own constructs read like
-built-in language features. C++ programmers will recognize both the mechanism
-and the motive: this is exactly `operator()`, and an object that defines `apply`
-is a callable "functor".
-
-So this is the lesson of [§J.1](#j1-infix-method--operator-notation--precedence)
-from the other direction: there, operators turned out to be ordinary method
-calls; here, **function-call syntax is one too**. That single rewrite is the
-language's whole contribution — the method itself is ordinary code someone
-wrote.
-
-Two consequences follow, and together they explain a lot of code that otherwise
-looks like built-in syntax:
-
-- **Dropping the *name* is not the same as dropping the *dot*.** The infix rule
-  of §J.1 lets any single-argument method lose its dot (`a add b`); the `apply`
-  rule lets one particular method lose its name. The two are independent:
-  `apply` loses its name, an infix operator loses its dot.
-- **`apply` is not a keyword and implements no interface.** Any class or object
-  may define one, with any signature, overloaded or curried; the compiler simply
-  looks the name up. So `Mux.apply` and a `UInt`'s `apply` are unrelated methods
-  that happen to share a name — which is why the same syntax means "build a
-  multiplexer" in one place and "extract a bit" in another.
-
-| Written | What it really is | Where `apply` is defined |
-|---|---|---|
-| `IO(new Bundle { … })` | `IO.apply(…)` | Chisel's `object IO` |
-| `Mux(cond, a, b)` / `RegInit(0.U)` | `Mux.apply(…)` / `RegInit.apply(…)` | Chisel companion objects |
-| `cntReg(7)` | `cntReg.apply(7)` | `Bits` — **extracts bit 7**, not an array index |
-| `Seq(1, 2, 3)` / `Config(4, 2, 16)` | companion `apply` | stdlib / `case class` ([§B.2](#b2-case-class), [§F.1](#f1-seq--list--array--indexedseq-and-builders)) |
-| `test(new Dut) { c => … }` | `.apply(lambda)` on the object `test` returned | chiseltest's `TestBuilder` |
-
-The bit-extraction case is the one most often misread, because it looks exactly
-like indexing a collection:
-
-`ch06-sequential-building-blocks/src/main/scala/Counter.scala`
-
-```scala
-  when(cntReg(7)) {   // sign bit set => reached -1
-```
-
-And the ChiselTest bench is the case where the omission makes a library call
-look like syntax — the braces are an argument to a second, separate call:
-
-`ch06-sequential-building-blocks/src/test/scala/CounterTest.scala`
-
-```scala
-test(new WhenCounter(4)) { c => testFn(c, 4) }
-```
-
-> The ch06 review page [*Anatomy of `CounterTest.scala`*](ch06-sequential-building-blocks/reviews/CounterTest.md)
-> walks that last line through both calls in detail.
-
 ---
 
-## K. ScalaTest DSL (reads like English, is really Scala)
+## I. ScalaTest DSL (reads like English, is really Scala)
+
 
 The test files read like sentences, but every word is an ordinary Scala method
-call in infix position (see [§J](#j-operators-literals--runtime-idioms)). ScalaTest
+call in infix position (see [§H](#h-elaboration-time-contracts-assert--require)). ScalaTest
 is the most flexible of Scala's testing options; its central concept is the
 **suite** — a named collection of tests — and you shape *how* tests are written by
 mixing in style and matcher traits. The tutorial uses the "tests as
@@ -1086,7 +717,10 @@ object Unnecessary extends Tag("Unnecessary")
 
 ---
 
-## L. What the tutorial does *not* use
+---
+
+## J. What the tutorial does *not* use
+
 
 So this reference doesn't over-promise, these Scala features **do not appear** in
 the tutorial's own code (you may still meet them elsewhere), with a one-line
@@ -1099,7 +733,7 @@ sketch of each:
   into `xs.map(f)`.
 - **user-defined *symbolic* operators / `unary_` methods** — every symbolic
   operator you see is a Chisel library method used infix (see
-  [§J](#j-operators-literals--runtime-idioms)); the tutorial never *defines* one.
+  [§H](#h-elaboration-time-contracts-assert--require)); the tutorial never *defines* one.
 - **`implicit` / `given` conversions and context parameters** — a function's
   behaviour often depends on contextual data; *context parameters* (Scala 3
   "givens", the older `implicit` in the Scala 2.13 the tutorial uses) let the
@@ -1128,6 +762,8 @@ val io = IO(new Bundle {
 
 ---
 
+---
+
 ## Where the chapters already explain Scala
 
 Several chapter READMEs have inline **"Scala note"** callouts. This file
@@ -1135,6 +771,7 @@ consolidates and extends them; consult the originals for the long-form version:
 
 | Chapter README (line) | Topic |
 |---|---|
+| `ch01-introduction/README.md` §1.2 | **The whole Scala crash course** — the basics this file builds on |
 | `ch02-basic-components/README.md` (~96) | Type inference |
 | `ch02-basic-components/README.md` (~181) | Operator precedence |
 | `ch05-combinational-building-blocks/README.md` (~121) | Scala `if` vs Chisel `when` |

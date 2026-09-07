@@ -68,7 +68,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 ```
 
 `_` is Scala's wildcard, the equivalent of Java's `*`
-(*Scala note — [§A.3](../../SCALA-NOTES.md#a3-package-and-import)*). Each
+(*Scala note — [§1.2.17](../../ch01-introduction/README.md#1217-packages-and-imports)*). Each
 import brings in one vocabulary, and they sit on opposite sides of an important
 line:
 
@@ -81,7 +81,7 @@ line:
 The `var`, `for`, and `if` inside `testFn` are ordinary Scala running on the
 JVM. They are *not* hardware: nothing in this file is synthesized. It is a
 program that builds a circuit, starts a simulator, and pokes at it
-(*Scala note — [§I](../../SCALA-NOTES.md#i-scala-vs-chisel-the-elaboration-vs-hardware-line)*).
+(*Scala note — [§1.2.18](../../ch01-introduction/README.md#1218-scala-vs-chisel-the-elaboration-vs-hardware-line)*).
 
 ---
 
@@ -100,7 +100,7 @@ class CounterTest extends AnyFlatSpec with ChiselScalatestTester with CountTest 
 ```
 
 Scala allows exactly one `extends` and any number of `with` mix-ins
-(*Scala note — [§A.4](../../SCALA-NOTES.md#a4-trait--mixed-in-with-with)*).
+(*Scala note — [§A.1](../../SCALA-NOTES.md#a1-trait--mixed-in-with-with)*).
 Each of the three supplies one piece of syntax used above:
 
 | Mix-in | Supplies |
@@ -111,7 +111,7 @@ Each of the three supplies one piece of syntax used above:
 
 `should` and `in` are not keywords — they are methods ScalaTest attaches to a
 `String`, which is why the declaration reads like English
-(*Scala note — [§K](../../SCALA-NOTES.md#k-scalatest-dsl-reads-like-english-is-really-scala)*).
+(*Scala note — [§I](../../SCALA-NOTES.md#i-scalatest-dsl-reads-like-english-is-really-scala)*).
 The result is a test registered under the name **"WhenCounter 4 should count"**;
 that string is what a failure report prints, and it is also what ChiselTest uses
 to name the test's output directory under `test_run_dir/`.
@@ -165,13 +165,13 @@ the DUT to nothing. That signature is what the braces have to satisfy.
 `obj(arg)` is shorthand for `obj.apply(arg)` — the one method name Scala lets
 you omit — and a single-argument list may be written with braces instead of
 parentheses (*Scala note —
-[§J.7](../../SCALA-NOTES.md#j7-apply-the-one-method-name-you-may-omit)*). So the
+[§1.2.10](../../ch01-introduction/README.md#1210-apply-the-one-method-name-you-may-omit)*). So the
 line really means `test(new WhenCounter(4)).apply(c => testFn(c, 4))`: the
 parentheses are the first call, the braces the second.
 
 The braces look like a block but are a **function literal** — `c` is its
 parameter declaration, and the name is free (`dut`, `x`, anything)
-(*Scala note — [§E.1](../../SCALA-NOTES.md#e1-function-literals-lambdas-and-the--arrow)*).
+(*Scala note — [§D.1](../../SCALA-NOTES.md#d1-function-literals-lambdas-and-the--arrow)*).
 
 That one line carries the rest. `dutGen` and `testFn` travel into `runTest`
 **together**, so that is where the recipe is finally called — the module is
@@ -215,13 +215,13 @@ trait CountTest {
 
 `trait` is Scala's interface-with-implementation; mixing it in with `with` makes
 `testFn` available as if it were declared in the test class
-(*Scala note — [§A.4](../../SCALA-NOTES.md#a4-trait--mixed-in-with-with)*).
+(*Scala note — [§A.1](../../SCALA-NOTES.md#a1-trait--mixed-in-with-with)*).
 The return type is omitted and inferred as `Unit`
-(*Scala note — [§C.5](../../SCALA-NOTES.md#c5-block-as-expression-implicit-return)*).
+(*Scala note — [§1.2.4](../../ch01-introduction/README.md#124-everything-is-an-expression)*).
 
 `[T <: Counter]` is a type parameter with an **upper bound**: `T` may be
 `Counter` or any subtype, and nothing else
-(*Scala note — [§D.1](../../SCALA-NOTES.md#d1-type-parameters-t-with-an-upper-bound-t--x)*).
+(*Scala note — [§C.1](../../SCALA-NOTES.md#c1-type-parameters-t-with-an-upper-bound-t--x)*).
 The bound is what makes `c.io` legal, because the base class declares it:
 
 `src/main/scala/Counter.scala`
@@ -252,13 +252,13 @@ for (_ <- 0 until n * 3) {
 *excerpt — the loop header, dedented*
 
 - `var` is a reassignable variable, unlike `val`
-  (*Scala note — [§C.1](../../SCALA-NOTES.md#c1-val-vs-var)*). It is **not** a
+  (*Scala note — [§1.2.1](../../ch01-introduction/README.md#121-values-and-variables-val-vs-var)*). It is **not** a
   register — it is the bench's own prediction of the DUT's state.
 - `0 until n * 3` is a `Range` covering `0 … n*3-1`; `until` excludes the end
   bound, `to` would include it
-  (*Scala note — [§F.2](../../SCALA-NOTES.md#f2-ranges-until-exclusive-vs-to-inclusive)*).
+  (*Scala note — [§1.2.12](../../ch01-introduction/README.md#1212-ranges-and-the-for-loop)*).
 - `_` in the generator position discards the loop index, which is never used
-  (*Scala note — [§H.1](../../SCALA-NOTES.md#h1-for-over-a-range)*).
+  (*Scala note — [§1.2.12](../../ch01-introduction/README.md#1212-ranges-and-the-for-loop)*).
 - `n * 3` runs the DUT for **three full periods**, so a tick pattern has to
   repeat rather than coincide once.
 
@@ -290,7 +290,7 @@ The distinction between ① ② and ③ is the heart of the bench:
 
 `false.B` / `true.B` lift a Scala `Boolean` into a Chisel `Bool` literal, which
 is what `expect` compares against a hardware pin
-(*Scala note — [§J.2](../../SCALA-NOTES.md#j2-literals)*). ChiselTest offers
+(*Scala note — [§1.2.3](../../ch01-introduction/README.md#123-literals)*). ChiselTest offers
 both `peek()` (returns a Chisel `Bool`) and `peekBoolean()` (returns a Scala
 `Boolean`); the `if` needs the Scala one.
 

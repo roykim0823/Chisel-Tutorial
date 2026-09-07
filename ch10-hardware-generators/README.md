@@ -18,6 +18,11 @@ simulation runs.*
 
 ## 10.1 A little Scala
 
+> This section is the book's own Scala refresher, seen from the *generator*
+> angle. For the language itself — including all of the constructs below —
+> see [Chapter 1 §1.2, "A crash course in Scala"](../ch01-introduction/README.md#12-a-crash-course-in-scala),
+> and [`SCALA-NOTES.md`](../SCALA-NOTES.md) for what the later chapters add.
+
 Two variable kinds: `val` (immutable — used to *name* hardware) and `var`
 (mutable — used only when *generating* hardware, never to name a component).
 Key building blocks for generators: `for` loops, `if`/`else` (evaluated at
@@ -61,7 +66,7 @@ val zipCode = city._1
 val name = city._2
 ```
 
-*Scala note — Scala tuples → [§G.2](../SCALA-NOTES.md#g2-tuples).*
+*Scala note — Scala tuples → [§1.2.14](../ch01-introduction/README.md#1214-tuples).*
 
 Tuples are useful for returning more than one value from a function — see
 §10.2 below.
@@ -90,7 +95,7 @@ def adder(x: UInt, y: UInt) = {
 }
 ```
 
-*Scala note — a `def` method → [§C.4](../SCALA-NOTES.md#c4-def-methods), and a block's value is its last expression → [§C.5](../SCALA-NOTES.md#c5-block-as-expression-implicit-return).*
+*Scala note — a `def` method → [§1.2.5](../ch01-introduction/README.md#125-methods-def), and a block's value is its last expression → [§1.2.4](../ch01-introduction/README.md#124-everything-is-an-expression).*
 
 Calling it twice creates two independent adder instances — no add operation
 runs at elaboration time, the calls just build hardware:
@@ -173,7 +178,7 @@ with **`VecInit`** and ordinary Scala:
   val square = squareROM(n)
 ```
 
-*Scala note — `map`/`reduce`/`zip`/`zipWithIndex` → [§F.3](../SCALA-NOTES.md#f3-map--foreach--reduce--zip--zipwithindex), and a `String` as a `Seq[Char]` → [§F.4](../SCALA-NOTES.md#f4-string-as-a-seqchar).*
+*Scala note — `map`/`reduce`/`zip`/`zipWithIndex` → [§E.1](../SCALA-NOTES.md#e1-map--foreach--reduce--zip--zipwithindex), and a `String` as a `Seq[Char]` → [§E.2](../SCALA-NOTES.md#e2-string-as-a-seqchar).*
 
 The classic example is **binary → BCD** conversion. In VHDL you'd generate this
 table with an external script; in Chisel a Scala loop builds it inline:
@@ -406,7 +411,7 @@ val a = Module(new ParamAdder())          // 32 bits
 val b = Module(new ParamAdder(n = 8))     // 8 bits, spelled out
 ```
 
-*Scala note — default arguments → [§C.7](../SCALA-NOTES.md#c7-default-arguments); named arguments → [§C.6](../SCALA-NOTES.md#c6-named-arguments).*
+*Scala note — default arguments → [§1.2.6](../ch01-introduction/README.md#126-named-and-default-arguments); named arguments → [§1.2.6](../ch01-introduction/README.md#126-named-and-default-arguments).*
 
 **Rejecting nonsense early.** Nothing stops a caller from writing
 `new ParamAdder(0)`, which would elaborate a zero-width adder. A `require` at
@@ -426,7 +431,7 @@ elaboration with a plain Scala exception rather than producing a broken circuit:
 java.lang.IllegalArgumentException: requirement failed: width must be positive, got 0
 ```
 
-*Scala note — `require` as a precondition → [§J.4](../SCALA-NOTES.md#j4-require).*
+*Scala note — `require` as a precondition → [§H.2](../SCALA-NOTES.md#h2-require).*
 The same idea applied to a whole parameter set is
 [10.4.2](#1042-grouping-parameters-in-a-case-class).
 
@@ -509,7 +514,7 @@ case class SaveConf(txDepth: Int, rxDepth: Int, width: Int) {
 }
 ```
 
-*Scala note — `case class` → [§B.2](../SCALA-NOTES.md#b2-case-class); Scala's `assert` → [§J.3](../SCALA-NOTES.md#j3-assert-scala).*
+*Scala note — `case class` → [§B.2](../SCALA-NOTES.md#b2-case-class); Scala's `assert` → [§H.1](../SCALA-NOTES.md#h1-assert-scala).*
 
 An object of the case class is created by calling the constructor; fields are
 immutable and read by name:
@@ -543,7 +548,7 @@ a Chisel *type*. `[T <: Data]` accepts any Chisel type, so one mux works for a
   }
 ```
 
-*Scala note — a type parameter with an upper bound → [§D.1](../SCALA-NOTES.md#d1-type-parameters-t-with-an-upper-bound-t--x).*
+*Scala note — a type parameter with an upper bound → [§C.1](../SCALA-NOTES.md#c1-type-parameters-t-with-an-upper-bound-t--x).*
 
 Calling it with a plain `UInt` needs nothing special:
 
@@ -893,7 +898,7 @@ class NerdTicker(n: Int) extends Ticker(n) {
 }
 ```
 
-*Scala note — an `abstract class` with constructor parameters → [§A.5](../SCALA-NOTES.md#a5-abstract-class-with-constructor-parameters).*
+*Scala note — an `abstract class` with constructor parameters → [§A.2](../SCALA-NOTES.md#a2-abstract-class-with-constructor-parameters).*
 
 The tester takes `[T <: Ticker]`, so it accepts any implementation:
 
@@ -991,7 +996,7 @@ literal to just the operator:
   val sum = vec.reduceTree(_ + _)
 ```
 
-*Scala note — higher-order functions → [§E.4](../SCALA-NOTES.md#e4-higher-order-functions) and the `_` placeholder (point-free) → [§E.3](../SCALA-NOTES.md#e3-the-_-placeholder-point-free-style).*
+*Scala note — higher-order functions → [§D.4](../SCALA-NOTES.md#d4-higher-order-functions) and the `_` placeholder (point-free) → [§D.3](../SCALA-NOTES.md#d3-the-_-placeholder-point-free-style).*
 
 That last line also swaps `reduce` for **`reduceTree`**, which is the other half
 of the story. `reduce` folds left, producing a *chain* of adders —
@@ -1412,7 +1417,7 @@ easy to trip over: Scala 2 has **no top-level `def`** — a bare function at the
 top level of a file is a compile error, so a free function must live in an
 `object` (or be a method of a class, as in the book's version).
 
-*Scala note — an `object` as a namespace, and why a free `def` needs one → [§A.7](../SCALA-NOTES.md#a7-object-as-a-namespace--companion-object); passing a function as a parameter → [§E.4](../SCALA-NOTES.md#e4-higher-order-functions).*
+*Scala note — an `object` as a namespace, and why a free `def` needs one → [§A.4](../SCALA-NOTES.md#a4-object-as-a-namespace--companion-object); passing a function as a parameter → [§D.4](../SCALA-NOTES.md#d4-higher-order-functions).*
 
 All that is left is to write the two 2:1 arbitration functions themselves. They
 live side by side in the `Arbitration` object, priority first:

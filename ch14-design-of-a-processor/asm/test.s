@@ -1,0 +1,13 @@
+// The example program from Section 14.1: immediate load, arithmetic, and
+// logic instructions. Like every Leros test program it leaves 0 in the
+// accumulator, and ends with a system call.
+loadi 1
+addi 2
+ori 0x50
+andi 0x1f
+subi 0x13
+loadi 0xab
+addi 0x01
+subi 0xac
+
+scall 0

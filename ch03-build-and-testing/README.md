@@ -71,7 +71,7 @@ import mypack._
 val abc = new Abc()
 ```
 
-*Scala note — `package` & `import` → [§A.3](../SCALA-NOTES.md#a3-package-and-import).*
+*Scala note — `package` & `import` → [§1.2.17](../ch01-introduction/README.md#1217-packages-and-imports).*
 
 Both `pack.scala` and `usepack.scala` exist only to show how packages and
 imports are organized — **neither has a runnable part.** They define modules
@@ -547,7 +547,7 @@ class WaveformCounterTest extends AnyFlatSpec with ChiselScalatestTester {
 }
 ```
 
-*Scala note — ranges (`until`/`to`) → [§F.2](../SCALA-NOTES.md#f2-ranges-until-exclusive-vs-to-inclusive); `for` over a range → [§H.1](../SCALA-NOTES.md#h1-for-over-a-range).*
+*Scala note — ranges (`until`/`to`) → [§1.2.12](../ch01-introduction/README.md#1212-ranges-and-the-for-loop); `for` over a range → [§1.2.12](../ch01-introduction/README.md#1212-ranges-and-the-for-loop).*
 
 ### 3.2.4 printf debugging
 

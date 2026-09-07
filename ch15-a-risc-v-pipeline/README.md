@@ -975,7 +975,7 @@ object AluType extends Enumeration {
 }
 ```
 
-*Scala note — Scala `Enumeration` → [§B.3](../SCALA-NOTES.md#b3-scalas-enumeration--type-alias); `type` alias → [§D.3](../SCALA-NOTES.md#d3-type-alias).*
+*Scala note — Scala `Enumeration` → [§B.3](../SCALA-NOTES.md#b3-scalas-enumeration--type-alias); `type` alias → [§C.3](../SCALA-NOTES.md#c3-type-alias).*
 
 The same file also holds the opcode constants (`Opcode`), the `InstrType`
 enumeration used by `getImm`, the `func3`/`func7` constants for the ALU, branch,

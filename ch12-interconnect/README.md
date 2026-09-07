@@ -741,7 +741,7 @@ loads counter 2 with 0 and counter 3 with 1000, and the read-back shows both
 values *plus* the cycles that have elapsed since — "counter reset" checks `< 5`,
 not `== 0`, because the counter kept going while the read was in flight.
 
-*Scala note — default arguments → [§C.7](../SCALA-NOTES.md#c7-default-arguments), nested (local) functions & closures → [§C.8](../SCALA-NOTES.md#c8-nested-local-functions--closures); string interpolation `s"…"` → [§J.5](../SCALA-NOTES.md#j5-string-interpolation-s).*
+*Scala note — default arguments → [§1.2.6](../ch01-introduction/README.md#126-named-and-default-arguments), nested (local) functions & closures → [§D.2](../SCALA-NOTES.md#d2-nested-local-functions--closures); string interpolation `s"…"` → [§1.2.15](../ch01-introduction/README.md#1215-string-interpolation).*
 
 The same file also keeps the hand-written, "bit-banging" version of this test —
 every pin poked and expected by hand — as `"CounterDevice" should "work"`. The

@@ -91,7 +91,7 @@ the bit width — can be left out for Chisel to infer. That is why a Chisel
 description is often more concise and readable than the equivalent VHDL or
 Verilog. (Even so, spelling out widths at creation is good practice; see §2.8.)
 
-*Scala note — `new` & type inference → [§C.3](../SCALA-NOTES.md#c3-new-and-type-inference).*
+*Scala note — `new` & type inference → [§1.2.2](../ch01-introduction/README.md#122-types-are-inferred-but-you-can-state-them).*
 
 Non-decimal constants use a string prefixed by `h` (hex), `o` (octal), or `b`
 (binary); underscores group digits and are ignored:
@@ -111,7 +111,7 @@ val aChar = 'A'.U   // 65
 Bool(); true.B; false.B
 ```
 
-*Scala note — literals (char `'A'`, hex/binary strings, no octal, `L` suffix) → [§J.2](../SCALA-NOTES.md#j2-literals).*
+*Scala note — literals (char `'A'`, hex/binary strings, no octal, `L` suffix) → [§1.2.3](../ch01-introduction/README.md#123-literals).*
 
 All of the constructs above live together in `src/main/scala/Logic.scala` —
 open it and match each line to the notes here.
@@ -186,7 +186,7 @@ divide/modulo → width of the numerator.
 > **Scala's** precedence — which is *similar but not identical* to Java/C (and
 > different again from VHDL, where all logic operators share one precedence and
 > evaluate left-to-right). When in doubt, **use parentheses.** See
-> [Scala Notes §J.1](../SCALA-NOTES.md#j1-infix-method--operator-notation--precedence) —
+> [Scala Notes §J.1](../ch01-introduction/README.md#129-operators-are-method-calls) —
 > Chisel's operators are ordinary Scala method calls used infix.
 
 | Function | Description | Types |
@@ -502,7 +502,7 @@ class RegisterFile(debug: Boolean) extends Module {
 }
 ```
 
-*Scala note — `if` as an expression → [§C.2](../SCALA-NOTES.md#c2-if-as-an-expression); `Seq`/`List`/`Array` builders → [§F.1](../SCALA-NOTES.md#f1-seq--list--array--indexedseq-and-builders); `Option`/`Some`/`None` → [§G.1](../SCALA-NOTES.md#g1-option--some--none--get).*
+*Scala note — `if` as an expression → [§1.2.4](../ch01-introduction/README.md#124-everything-is-an-expression); `Seq`/`List`/`Array` builders → [§1.2.11](../ch01-introduction/README.md#1211-collections-seq-list-array); `Option`/`Some`/`None` → [§F.1](../SCALA-NOTES.md#f1-option--some--none--get).*
 
 Read this carefully — it packs several ideas:
 
@@ -819,8 +819,8 @@ Two consequences worth absorbing now, because they remove most of the mystery:
   call it `c` instead; nothing changes.
 
 *Scala note — the `{ dut => … }` block is a function literal →
-[§E.1](../SCALA-NOTES.md#e1-function-literals-lambdas-and-the--arrow); the
-`should` / `in` chain → [§K](../SCALA-NOTES.md#k-scalatest-dsl-reads-like-english-is-really-scala).*
+[§D.1](../SCALA-NOTES.md#d1-function-literals-lambdas-and-the--arrow); the
+`should` / `in` chain → [§I](../SCALA-NOTES.md#i-scalatest-dsl-reads-like-english-is-really-scala).*
 
 `src/test/scala/RegisterFileTest.scala` does the same for the register file:
 it writes `123` to register 4, steps the clock, then checks that reading

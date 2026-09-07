@@ -72,7 +72,7 @@ while (dut.io.deq.empty.peekBoolean()) dut.clock.step()    // block until data
 dut.io.deq.dout.expect(42.U)
 ```
 
-*Scala note — the `while` loop → [§H.2](../SCALA-NOTES.md#h2-while-loop).*
+*Scala note — the `while` loop → [§1.2.13](../ch01-introduction/README.md#1213-while).*
 
 ---
 
@@ -110,7 +110,7 @@ abstract class Fifo[T <: Data](gen: T, val depth: Int) extends Module {
 }
 ```
 
-*Scala note — `private` members → [§A.6](../SCALA-NOTES.md#a6-private-members); `require` → [§J.4](../SCALA-NOTES.md#j4-require).*
+*Scala note — `private` members → [§A.3](../SCALA-NOTES.md#a3-private-members); `require` → [§H.2](../SCALA-NOTES.md#h2-require).*
 
 Five implementations (all in `fifo.scala`), each a subclass of `Fifo`:
 
@@ -145,7 +145,7 @@ io.deq.valid := (stateReg === one   || stateReg === two)
 io.deq.bits  := dataReg
 ```
 
-*Scala note — the generic test's wildcard type argument `[_ <: Data]` → [§D.2](../SCALA-NOTES.md#d2-wildcard-type-argument-_--data).*
+*Scala note — the generic test's wildcard type argument `[_ <: Data]` → [§C.2](../SCALA-NOTES.md#c2-wildcard-type-argument-_--data).*
 
 **`RegFifo`** — the hardware version of a software **circular buffer**: two
 pointers (read and write) walk around a small register file
@@ -261,7 +261,7 @@ test(new UartLoopback(frequency = 1000, baudRate = 10)) { dut =>
 }
 ```
 
-*Scala note — named arguments → [§C.6](../SCALA-NOTES.md#c6-named-arguments).*
+*Scala note — named arguments → [§1.2.6](../ch01-introduction/README.md#126-named-and-default-arguments).*
 
 ---
 
