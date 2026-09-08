@@ -15,6 +15,20 @@ object Generate extends App {
   emitVerilog(new Assert(), opts)
   emitVerilog(new AssertOverflow(), opts)
   emitVerilog(new TickGenTestTop(), opts)
+
+  // §13.4's formal examples. Saturate and SaturateFixed differ by one constant,
+  // so diffing their .sv shows the off-by-one the solver found. AssumeNoOverflow
+  // is here because `assume` survives into the output as a real SystemVerilog
+  // `assume` statement, which is worth seeing next to an assertion's
+  // $error/$fatal pair.
+  emitVerilog(new Saturate(), opts)
+  emitVerilog(new SaturateFixed(), opts)
+  emitVerilog(new AssumeNoOverflow(), opts)
+
+  // NOT emitted: MonotonicCounter. `past` is not a hardware construct - it is a
+  // chiseltest FIRRTL transform, so it attaches annotations firtool rejects with
+  // `error: Unhandled annotation: ... chiseltest.simulator.Firrtl2AnnotationWrapper`.
+  // It runs under `verify` (which uses chiseltest's own firrtl2 pipeline) only.
 }
 
 // The same assertion emitted as a concurrent SystemVerilog assertion instead of

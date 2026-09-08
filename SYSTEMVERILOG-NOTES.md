@@ -1166,7 +1166,7 @@ run `sbt "runMain Generate"` inside a chapter to (re)create it.
 | [10](ch10-hardware-generators/README.md) | `FunctionalComp`, `FunctionalAdd`, `BcdTable`, `GenHardware`, `UseAdder`, `ParamFunc`, `FunctionalMin`, `UpTicker`, `DownTicker`, `NerdTicker`, `ArbiterTree`, `UseParamRouter`, `UseParamRouter2`, `RegisterFile` |
 | [11](ch11-example-designs/README.md) | `BubbleFifo`, `Sender`, `Echo`, `UartLoopback`, and in `generated/fifo/`: `BubbleFifo`, `DoubleBufferFifo`, `RegFifo`, `MemFifo`, `CombFifo` |
 | [12](ch12-interconnect/README.md) | `CounterDevice`, `UseMemMappedRV` |
-| [13](ch13-debugging-testing-verification/README.md) | `Assert`, `TickGenTestTop` |
+| [13](ch13-debugging-testing-verification/README.md) | `Assert`, `AssertOverflow`, `TickGenTestTop`, `Saturate`, `SaturateFixed`, `AssumeNoOverflow` |
 | [14](ch14-design-of-a-processor/README.md) | `AluAccu`, `Decode`, `DataMem` |
 | [15](ch15-a-risc-v-pipeline/README.md) | `ThreeCats`, `AluModule`, `DecodeModule`, `Csr`, `InstructionROM`, `ScratchPadMem` |
 
@@ -1184,5 +1184,10 @@ Designs deliberately **not** emitted:
   so emitting both it and the plain CPU would put two differently-ported modules
   named `ThreeCats` into one `generated/` folder. The clean `ThreeCats.sv` is
   the one to read.
+- `ch13`'s `MonotonicCounter` — it uses `chiseltest.formal.past`, which is not a
+  hardware construct but a chiseltest FIRRTL transform. It attaches annotations
+  firtool rejects outright (`error: Unhandled annotation: ... class =
+  "chiseltest.simulator.Firrtl2AnnotationWrapper"`), so the module runs under
+  `verify` and cannot be emitted at all.
 - Submodules such as `Adder`, `Tx`, `Rx`, `PopCountFSM` — already contained in
   their parent's `.sv`, per [§F](#f-modules-hierarchy-and-parameterization).

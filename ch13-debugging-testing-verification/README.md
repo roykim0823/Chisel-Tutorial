@@ -723,27 +723,77 @@ always goes through generated SystemVerilog, with no FIRRTL-interpreter option:
 ```scala
 import chisel3.simulator.EphemeralSimulator._
 
-simulate(new Comparator()) { dut =>
-  dut.io.a.poke(3.U); dut.io.b.poke(3.U); dut.clock.step()
-  dut.io.equ.expect(true.B)
+simulate(new TickGen()) { dut =>
+  for (_ <- 0 until 9) { dut.io.tick.expect(false.B); dut.clock.step(1) }
+  dut.io.tick.expect(true.B)
 }
 ```
 *illustrative — the svsim path, which always compiles the SystemVerilog*
 
-> **Version warning, verified on this toolchain.** Neither Verilog-level path
-> runs against **Verilator 5.050**, which is much newer than the pinned Chisel
-> 6.5.0 / chiseltest 6.0.0. Two independent failures:
+> **Toolchain check.** Both Verilog-level paths — `VerilatorBackendAnnotation`
+> and `EphemeralSimulator` — **do** run against the pinned Chisel 6.5.0 /
+> chiseltest 6.0.0 with the Verilator on this machine:
 >
-> - `VerilatorBackendAnnotation` → `error: unknown type name 'WData'` while
->   compiling chiseltest's C++ harness (Verilator changed that API).
-> - `EphemeralSimulator` → `java.lang.Exception: Unexpected message: Ready`
->   (the simulator binary builds and starts, then the handshake protocol
->   mismatches).
+> ```
+> $ verilator --version
+> Verilator 5.022 2024-02-24 rev conda-forge build 1
+> ```
 >
-> Both are version skew, not design problems — the Verilog itself is fine. If
-> you need the Verilog-level path, pair the pinned Chisel with a Verilator from
-> the same era, or move to a newer Chisel/chiseltest. The chapters here all pass
-> on Treadle, which is why the tutorial does not require Verilator.
+> To reproduce: wrap the `simulate` block above in an `AnyFlatSpec` under
+> `src/test/scala/` — **on its own**, because importing `chiseltest._` and
+> `chisel3.simulator.EphemeralSimulator._` into the *same* file leaves their
+> `poke`/`step` implicits unresolved (`value step is not a member of
+> chisel3.Clock`). It passes, driving a real Verilator binary.
+>
+> The two paths differ in what they leave behind, which is worth seeing. Add
+> `.withAnnotations(Seq(VerilatorBackendAnnotation))` to a `test(...)` and
+> `test_run_dir/` holds the whole Verilog toolchain — the emitted `.sv`, the C++
+> harness, Verilator's generated sources and the compiled binary:
+>
+> ```
+> test_run_dir/<test name>/TickGen.sv
+> test_run_dir/<test name>/TickGen.lo.fir
+> test_run_dir/<test name>/TickGen-harness.cpp
+> test_run_dir/<test name>/verilated/VTickGen__ALL.cpp
+> test_run_dir/<test name>/verilated/VTickGen          <- the simulator binary
+> ```
+>
+> `EphemeralSimulator`, by contrast, leaves **nothing** — that is what
+> *ephemeral* means: it builds in a temporary directory and discards it, so
+> there is no `.sv` to inspect afterwards. Use the chiseltest backend when you
+> want the artifacts, or `chisel3.simulator` directly (rather than the
+> `EphemeralSimulator` convenience object) to choose a workspace that persists.
+>
+> Verilator much newer than the pinned Chisel does break, in two ways worth
+> recognizing: chiseltest's C++ harness stops compiling
+> (`error: unknown type name 'WData'` — Verilator changed that API), and svsim
+> fails its startup handshake (`java.lang.Exception: Unexpected message:
+> Ready`). Neither is a problem with your design; both are version skew. If you
+> meet either, check your Verilator version first and pair the pinned Chisel
+> with one from its own era — the 5.022 above dates from February 2024, months
+> before Chisel 6.5.0. The chapters here all pass on Treadle regardless, which
+> is why the tutorial does not *require* Verilator at all.
+
+> **Where this API is going.** ChiselTest is **archived**: the repository went
+> read-only on 2024-08-19 ("we no longer have a maintainer"), and **6.0.0 — the
+> version pinned here — is its last release**. There is no 7.x. Its successor is
+> **ChiselSim**, the `chisel3.simulator.scalatest.ChiselSim` trait, which wraps
+> the svsim path above in ScalaTest and is where the current Chisel
+> documentation points. Two things to know before reaching for it:
+>
+> - It is a **Chisel 7** API — `chisel3.simulator.scalatest` does not exist in
+>   the 6.5.0 pinned here, which has only the lower-level `chisel3.simulator`
+>   shown above. Chisel 7.13.0+ also ships a chiseltest-*named* compatibility
+>   shim, but it is ChiselSim underneath and does not preserve everything: its
+>   `fork` runs sequentially rather than concurrently (so §13.2.4's lesson would
+>   quietly stop holding), and its `expect` drops the message argument.
+> - **ChiselSim has no FIRRTL interpreter.** Its only two backends are Verilator
+>   and VCS, both external simulators, so `sbt test` would need a native
+>   toolchain — where Treadle needs nothing but a JVM. That, plus the book being
+>   written against Chisel 6, is why this tutorial stays on the pinned versions.
+>
+> §13.2.8 puts this chapter's own tests side by side in both styles, in a
+> runnable Chisel 7 sub-project, so you can see what a migration actually costs.
 
 ### 13.2.7 How this scales up: verifying a real design
 
@@ -796,6 +846,331 @@ module-level verification well, but not everything:
 concurrent-SVA form that formal tools consume, and why `Assert`'s assertion is
 deleted while `AssertOverflow`'s survives — is worked through with real captured
 output in [`SYSTEMVERILOG-NOTES.md` §N](../SYSTEMVERILOG-NOTES.md#n-simulation-only-constructs).
+
+---
+
+### 13.2.8 Running the same tests on ChiselSim
+
+The note above says ChiselTest is archived and **ChiselSim** is its successor.
+This section is that successor applied to this chapter's own three tests, so you
+can read the two styles side by side and see exactly what a migration costs.
+
+ChiselSim is a **Chisel 7** API, and this chapter — like the whole tutorial — is
+pinned to Chisel 6.5.0. Rather than unpin it, the ChiselSim tests live in a
+**nested project** with its own versions:
+
+`chiselsim/build.sbt`
+```scala
+// Chapter 13, ChiselSim addendum (§13.2.8).
+// A SEPARATE project on purpose: ChiselSim is a Chisel 7 API, and the chapter
+// itself is pinned to Chisel 6.5.0 / chiseltest 6.0.0 like the rest of the
+// tutorial. Keeping it here lets both sets of tests be real and runnable
+// without unpinning the chapter.
+scalaVersion := "2.13.18" // Chisel 7 pulls scala-library 2.13.18 (SIP-51)
+
+val chiselVersion = "7.15.0"
+
+scalacOptions ++= Seq(
+  "-deprecation",
+  "-feature",
+  "-unchecked",
+  "-language:reflectiveCalls",
+)
+
+addCompilerPlugin("org.chipsalliance" % "chisel-plugin" % chiselVersion cross CrossVersion.full)
+libraryDependencies += "org.chipsalliance" %% "chisel" % chiselVersion
+libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.19" % "test"
+```
+
+Two version facts are forced, not chosen. Chisel 7 is what brings
+`chisel3.simulator.scalatest`, and Chisel 7.15.0 pulls in scala-library 2.13.18,
+so sbt's SIP-51 check rejects the tutorial's usual 2.13.14 with
+`Expected scalaVersion to be 2.13.18 or later`. There is no `chiseltest`
+dependency at all.
+
+Run it from that folder, not the chapter root:
+
+```
+$ cd chiselsim
+$ sbt test
+```
+
+#### What actually changes in a test
+
+Almost nothing, and it is worth measuring rather than asserting. §13.2.3's
+`BoringTest` and its ChiselSim twin differ by **three** lines — the import, the
+trait, and the call that starts the simulation:
+
+```
+$ diff -u src/test/scala/BoringTest.scala \
+          chiselsim/src/test/scala/BoringSimTest.scala
+```
+
+```diff
+--- ch13/src/test/scala/BoringTest.scala
++++ ch13/chiselsim/src/test/scala/BoringSimTest.scala
+@@ -1,11 +1,14 @@
+ import chisel3._
+-import chiseltest._
++import chisel3.simulator.scalatest.ChiselSim
+ import org.scalatest.flatspec.AnyFlatSpec
+ 
+-// Test the tick generator WITH access to its bored-out internal counter.
+-class BoringTest extends AnyFlatSpec with ChiselScalatestTester {
++// The chapter's BoringTest, rewritten for ChiselSim. Three lines change: the
++// import, the trait mixed in, and `test(...)` becoming `simulate(...)`. The
++// class rename is only to keep the two readable side by side. Every
++// poke/step/expect inside the body is identical.
++class BoringSimTest extends AnyFlatSpec with ChiselSim {
+   "Boring" should "expose the internal counter" in {
+-    test(new TickGenTestTop()) { dut =>
++    simulate(new TickGenTestTop()) { dut =>
+       dut.io.tick.expect(false.B)
+       dut.io.counter.expect(0.U)
+ 
+```
+
+The diff stops there because the rest of the file is byte-identical: every
+`poke`, `step`, and `expect` carries over untouched, and so does the
+`AnyFlatSpec` "should" structure. The class rename is cosmetic — the two live in
+separate projects, so they could share a name. Read the body in §13.2.3's
+Listing 13.5; it is not reproduced here.
+
+The DUT needed one change, and it is not a ChiselSim change. `BoringUtils.bore`
+has a newer form in which the bored value is **returned** rather than written
+into a sink you pass in, so the wrapper reads like an ordinary connection:
+
+`chiselsim/src/main/scala/Boring.scala`
+```scala
+// chapter's Chisel 6 version calls the older `bore(source, Seq(sink))` form,
+// which still exists in Chisel 7 but is deprecated.
+class TickGenTestTop extends Module {
+  val io = IO(new Bundle {
+    val tick = Output(Bool())
+    val counter = Output(UInt(8.W))
+  })
+
+  val tickGen = Module(new TickGen)
+  io.tick := tickGen.io.tick
+  io.counter := BoringUtils.bore(tickGen.cntReg)
+}
+```
+
+The chapter's Chisel 6 `bore(source, Seq(sink))` form still exists in Chisel 7
+— it is deprecated, not removed, despite a Chisel 6 deprecation warning that
+says it would go in 7.0.
+
+```
+$ sbt "testOnly BoringSimTest"
+```
+
+```
+[info] BoringSimTest:
+[info] Boring
+[info] - should expose the internal counter
+[info] Run completed in 2 seconds, 735 milliseconds.
+[info] Total number of tests run: 1
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 1, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+#### Assertions, and proving one fires
+
+`AssertSimTest`'s first test is §13.3's `AssertTest` with the same three lines
+swapped, so it is not repeated here. What is new is the rest of the file.
+ChiselSim reports a failed Chisel `assert` as a specific exception —
+`chisel3.simulator.Exceptions.AssertionFailed`, message *"One or more assertions
+failed during Chiselsim simulation"* — which means you can **catch** it, and
+finally test the thing the chiseltest version never checks: that
+`AssertOverflow`'s assertion really does fire when the 8-bit add wraps.
+
+`chiselsim/src/test/scala/AssertSimTest.scala`
+```scala
+  // AssertOverflow asserts `io.sum >= io.a`, which is false whenever the 8-bit
+  // add wraps. A passing test here means the assertion fired.
+  "AssertOverflow" should "stop the simulation when its assertion fails" in {
+    intercept[Exceptions.AssertionFailed] {
+      simulate(new AssertOverflow()) { dut =>
+        dut.io.a.poke(100.U)
+        dut.io.b.poke(200.U) // 44 >= 100 is false
+        dut.clock.step()
+      }
+    }
+  }
+
+  it should "be satisfied when the add does not overflow" in {
+    simulate(new AssertOverflow()) { dut =>
+      dut.io.a.poke(100.U)
+      dut.io.b.poke(20.U) // 120 >= 100 holds
+      dut.clock.step()
+    }
+  }
+```
+
+The first of those passes *because* the simulation died; the second shows the
+same module staying quiet when the add does not overflow. Together they pin the
+assertion from both sides — a strictly stronger claim than §13.3's, which only
+ever exercises the passing case.
+
+```
+$ sbt "testOnly AssertSimTest"
+```
+
+```
+[info] AssertSimTest:
+[info] Assert
+[info] - should hold (even across an overflowing add)
+[info] AssertOverflow
+[info] - should stop the simulation when its assertion fails
+[info] - should be satisfied when the add does not overflow
+[info] Tests: succeeded 3, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+#### Tags are unaffected
+
+§13.2.2's filters are a **ScalaTest** feature, so they know nothing about which
+simulator runs underneath and keep working unchanged. That matters more here
+than it did on Treadle: every ChiselSim test pays for a Verilator build, so a
+tag that separates the simulating tests from the pure-Scala ones is worth having.
+
+`chiselsim/src/test/scala/TagSimTest.scala`
+```scala
+import chisel3._
+import chisel3.simulator.scalatest.ChiselSim
+import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+
+// Tags are a ScalaTest feature, not a simulator feature, so §13.2.2's filters
+// work on ChiselSim tests unchanged. `Slow` marks the tests that pay for a
+// Verilator build; exclude them with
+//   sbt "testOnly * -- -l Slow"
+object Slow extends Tag("Slow")
+
+class TagSimTest extends AnyFlatSpec with ChiselSim {
+  "A tagged ChiselSim test" should "still simulate" taggedAs (Slow) in {
+    simulate(new TickGen()) { dut =>
+      dut.clock.step(9)
+      dut.io.tick.expect(true.B)
+    }
+  }
+
+  it should "run alongside plain ScalaTest assertions" in {
+    assert(17 + 25 == 42) // no simulator involved, so no Verilator build
+  }
+}
+```
+
+```
+$ sbt 'testOnly * -- -l Slow'
+```
+
+```
+[info] TagSimTest:
+[info] A tagged ChiselSim test
+[info] - should run alongside plain ScalaTest assertions
+```
+
+The `should still simulate` line is gone — `-l` excluded it — while the untagged
+assertion in the same suite still ran.
+
+#### Waveforms without an annotation
+
+§13.1 dumps a VCD with `WriteVcdAnnotation`, which is baked into the test code.
+ChiselSim instead exposes tracing as a **command-line option**: mix in
+`Cli.EmitVcd` and the suite gains an `emitVcd` option, so one test serves both
+the traced and untraced runs.
+
+`chiselsim/src/test/scala/WaveSimTest.scala`
+```scala
+import chisel3._
+import chisel3.simulator.scalatest.{ChiselSim, Cli}
+import org.scalatest.flatspec.AnyFlatSpec
+
+// §13.1's waveform debugging, on the ChiselSim side. Mixing in Cli.EmitVcd
+// adds an `emitVcd` command-line option to this suite instead of hard-coding
+// a WriteVcdAnnotation, so the same test runs with or without tracing:
+//   sbt "testOnly WaveSimTest -- -DemitVcd=1"
+class WaveSimTest extends AnyFlatSpec with ChiselSim with Cli.EmitVcd {
+  "TickGen" should "tick on the tenth cycle" in {
+    simulate(new TickGen()) { dut =>
+      dut.clock.step(9)
+      // Real ChiselSim keeps expect's message argument (the Chisel 7
+      // chiseltest-compatibility shim does not).
+      dut.io.tick.expect(true.B, "tick must be high on the tenth cycle")
+    }
+  }
+}
+```
+
+Without the option, no trace is written at all. With it:
+
+```
+$ sbt "testOnly WaveSimTest -- -DemitVcd=1"
+$ find build -name "*.vcd"
+build/chiselsim/WaveSimTest/TickGen/should-tick-on-the-tenth-cycle/workdir-verilator/trace.vcd
+```
+
+That path is worth a second look. The ScalaTest ChiselSim trait keeps a
+**persistent** workspace under `build/chiselsim/<suite>/<module>/<test>/`, unlike
+the `EphemeralSimulator` of §13.2.6 which discards its temporary directory. And
+the trace reaches inside the module without any boring at all:
+
+```
+$version Generated by VerilatedVcd $end
+$timescale 100ps $end
+ $scope module TOP $end
+  $scope module svsimTestbench $end
+   $var wire 1 # clock [0:0] $end
+   $var wire 1 $ reset [0:0] $end
+   $var wire 1 % io_tick [0:0] $end
+   $var wire 32 & simulationState [31:0] $end
+   $var wire 32 ' traceSupported [31:0] $end
+   $scope module dut $end
+    $var wire 1 # clock $end
+    $var wire 1 $ reset $end
+    $var wire 1 % io_tick $end
+    $var wire 8 ( cntReg [7:0] $end
+    $var wire 1 % io_tick_0 $end
+   $upscope $end
+  $upscope $end
+ $upscope $end
+$enddefinitions $end
+```
+
+`cntReg` is right there in the waveform. Boring (§13.2.3) is for reading an
+internal signal from *test code*; a waveform never needed it.
+
+#### What does not port
+
+- **`fork`/`join` (§13.2.4) has no ChiselSim equivalent.** Chisel 7.13.0+ ships
+  a chiseltest-*named* shim in which `fork` compiles but runs the block
+  immediately to completion, so a concurrent producer/consumer test silently
+  becomes sequential. If you migrate a test like Chapter 11's `BubbleFifoTest`,
+  restructure it rather than trusting the shim.
+- **Treadle is gone.** ChiselSim's only backends are Verilator and VCS, so `sbt
+  test` now needs a native simulator. This chapter's four ChiselSim suites take
+  about 8 seconds against the chapter's own 3 seconds on Treadle, and they
+  cannot run at all on a machine without Verilator.
+- **`expect`'s message argument survives** in real ChiselSim (`WaveSimTest`
+  above uses it); it is only the compatibility shim that drops it.
+
+The chapter itself deliberately stays on chiseltest — see the note in §13.2.6
+for why. This sub-project is the parallel track, kept runnable so that both
+sides of the comparison are real.
+
+```
+$ sbt test
+```
+
+```
+[info] Run completed in 8 seconds, 199 milliseconds.
+[info] Total number of tests run: 7
+[info] Suites: completed 4, aborted 0
+[info] Tests: succeeded 7, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
 
 ---
 
@@ -889,12 +1264,117 @@ use **formal verification**, which checks a property for *all* inputs (up to a
 bound) using an SMT solver. Kevin Laeufer added formal verification to
 ChiselTest, and the **very same assertions** are reused for it.
 
-To explore it, install the open [Z3](https://github.com/Z3Prover/z3) theorem
-prover. Then substitute `test(..)` by `verify(..)`; `assume(...)` constrains
-inputs, and `past(x)` refers to a previous cycle's value. Listing 13.7 runs
-formal verification on our simple adder circuit with the (naive) assertions:
+### 13.4.1 What a bounded check actually does
 
-*illustrative — requires the Z3 solver installed*
+`BoundedCheck(k)` runs **bounded model checking**. The tool unrolls the circuit
+`k` times — `k` copies of the combinational logic, chained through the
+registers — and hands the solver one question: *is there any input sequence,
+starting from reset, that violates an assertion within `k` cycles?* The solver
+answers in one of two ways, and both are useful:
+
+| answer | meaning | what you get |
+|---|---|---|
+| satisfiable | such a sequence exists | a **counterexample**: concrete input values, cycle by cycle |
+| unsatisfiable | no such sequence exists | a **proof** — for every input, but only up to `k` cycles |
+
+That is the whole trade. You are not writing stimulus, so you cannot miss a
+corner case *within the bound*; but the bound is real, and §13.4.6 shows a bug
+that hides just beyond a shallow one.
+
+Three constructs do the talking, and only the first is new to this section:
+
+- **`assert(cond)`** — a claim about the design. The solver tries to break it.
+- **`assume(cond)`** — a constraint on the *environment*. The solver may only
+  choose inputs satisfying it, so an assumption narrows the search rather than
+  being checked (§13.4.4).
+- **`past(x)`** — the value `x` held on the previous cycle, which is what lets a
+  property span cycles (§13.4.6).
+
+Under the hood, `verify` takes the same FIRRTL the tests run on, converts it to
+a transition system, encodes that as SMT-LIB, and shells out to the solver —
+chiseltest's `Maltese` layer, which appears in the stack trace when a check
+fails. Six engines are supported (`Z3EngineAnnotation`,
+`BtormcEngineAnnotation`, `Yices2EngineAnnotation`, `CVC4EngineAnnotation`,
+`BitwuzlaEngineAnnotation`, `BoolectorEngineAnnotation`); Z3 is the default.
+
+### 13.4.2 Installing a solver and running the checks
+
+Formal verification needs an SMT solver on the `PATH`, which is why the chapter's
+plain `sbt test` does not run these checks: they are tagged, and `build.sbt`
+excludes the tag from the `test` task only.
+
+`src/test/scala/FormalTest.scala`
+```scala
+// Formal verification needs an SMT solver on the PATH, which not every reader
+// will have, so these tests carry a tag that build.sbt excludes from the
+// default `sbt test`. Run them with:
+//   sbt "testOnly * -- -n NeedsSolver"
+object NeedsSolver extends Tag("NeedsSolver")
+```
+
+`build.sbt`
+```scala
+// Formal verification (§13.4) needs an SMT solver on the PATH. Those tests are
+// tagged NeedsSolver and excluded here so that a plain `sbt test` works with no
+// native tools at all. Run them with:  sbt "testOnly * -- -n NeedsSolver"
+Test / test / testOptions += Tests.Argument("-l", "NeedsSolver")
+```
+
+Scoping the option to `Test / test` rather than `Test` is the part that matters:
+an unscoped `testOptions` also applies to `testOnly`, which would leave you
+unable to run the very tests you asked for by name.
+
+Any of the six solvers will do. The most self-contained route, verified here, is
+the Python wheel, which ships a `z3` executable that needs nothing but `PATH`:
+
+```
+$ python3 -m venv ~/z3env && ~/z3env/bin/pip install z3-solver
+$ export PATH="$HOME/z3env/bin:$PATH"
+$ z3 --version
+Z3 version 5.1.0 - 64 bit
+```
+
+Then run the checks. `testOnly` is not tag-filtered, so naming the suite is
+enough:
+
+```
+$ sbt "testOnly FormalTest"
+```
+
+```
+[info] FormalTest:
+[info] Assert
+[info] - should pass a bounded check
+[info] AssertOverflow
+[info] - should be refuted, because an 8-bit add can wrap
+[info] Saturate
+[info] - should be refuted, with a counterexample trace
+[info] SaturateFixed
+[info] - should pass, for all 2^32 inputs
+[info] AssumeNoOverflow
+[info] - should pass, because assume rules out the counterexample
+[info] MonotonicCounter
+[info] - should survive a shallow bounded check
+[info] - should be refuted once the bound reaches the wrap
+[info] Run completed in 16 seconds, 695 milliseconds.
+[info] Total number of tests run: 7
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 7, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+Note what "succeeded" means for the refutation tests. A check that *finds* a
+violation throws `FailedBoundedCheckException`, so the tests that are supposed
+to find one wrap `verify` in `intercept` — the same idiom §13.2.8 uses for
+ChiselSim assertions. A green suite therefore means every provable property was
+proved *and* every planted bug was caught.
+
+### 13.4.3 The book's example: the assertion was wrong
+
+Substitute `test(..)` by `verify(..)` and the chapter's adder goes through
+formal. Listing 13.7 is that, on the naive assertions:
+
+*illustrative — the book's formulation; this project's version is `FormalTest` above*
 ```scala
 import chiseltest.formal._
 
@@ -912,14 +1392,315 @@ waveform for the input data that leads to the violation: it uses `0xdb` and
 `0x65`, which give a sum of `0x40`. Those inputs overflow the 8-bit addition,
 and the simple test case never tried overflowing values. So the verification
 showed that the assertions claiming the sum is larger than or equal to the
-inputs are wrong. Adding `WriteVcdAnnotation` to the annotation list (as above)
-is what dumps that counterexample trace to a `.vcd`, which you open in GTKWave
-the same way as a regular simulation waveform.
+inputs are wrong. Adding `WriteVcdAnnotation` to the annotation list is what
+dumps that counterexample trace to a `.vcd`, which you open in GTKWave the same
+way as a regular simulation waveform.
 
-> **Not runnable here:** formal verification needs the
-> [Z3](https://github.com/Z3Prover/z3) theorem prover, which isn't installed in
-> this environment, so this project ships no formal test. Install Z3 and add a
-> `FormalTest` to try `verify` yourself.
+In this project the two halves of that story are separate modules, so both can
+be checked at once: `Assert` carries only the tautology and is proved, while
+`AssertOverflow` carries the naive claim and is refuted.
+
+`src/test/scala/FormalTest.scala`
+```scala
+  // The chapter's adder carries only a tautology, so it is provable.
+  "Assert" should "pass a bounded check" taggedAs (NeedsSolver) in {
+    verify(new Assert(), Seq(BoundedCheck(5)))
+  }
+
+  // AssertOverflow's assertion is the one the book's author found to be wrong.
+  // A passing test here means the solver refuted it, as it should.
+  "AssertOverflow" should "be refuted, because an 8-bit add can wrap" taggedAs (NeedsSolver) in {
+    intercept[FailedBoundedCheckException] {
+      verify(new AssertOverflow(), Seq(BoundedCheck(5)))
+    }
+  }
+```
+
+Your counterexample will not necessarily use the book's `0xdb`/`0x65`: any
+overflowing pair refutes the property, and which one the solver reports is its
+choice.
+
+### 13.4.4 `assume`: constraining the environment
+
+A refuted assertion does not always mean the *hardware* is wrong. Here it means
+the property was stated too strongly: `sum >= a` only holds if the caller never
+overflows the adder. `assume` says exactly that, and the solver then restricts
+itself to inputs that satisfy it:
+
+`src/main/scala/Saturate.scala`
+```scala
+// §13.4: `assume` constrains the environment. AssertOverflow's assertion is
+// false in general, but it becomes provable once the caller promises not to
+// overflow - which is what an assumption states. `+&` is the widening add, so
+// the sum in the assumption itself cannot wrap.
+class AssumeNoOverflow extends Module {
+  val io = IO(new Bundle {
+    val a = Input(UInt(8.W))
+    val b = Input(UInt(8.W))
+    val sum = Output(UInt(8.W))
+  })
+  io.sum := io.a + io.b
+
+  assume(io.a +& io.b <= 255.U)
+
+  assert(io.sum >= io.a, "8-bit add must not overflow")
+}
+```
+
+The same assertion that is refuted on `AssertOverflow` is proved here. That is
+the point of an assumption: it moves an obligation from the design to whatever
+drives it — and it is why assumptions are dangerous if you get them wrong. An
+over-strong `assume` can make anything "provable" by ruling out the very inputs
+that break it.
+
+Assumptions are not simulation-only. `assume` survives generation as a real
+SystemVerilog `assume`, next to the `$error`/`$fatal` pair an assertion becomes:
+
+```systemverilog
+      assume__assume: assume(~(_io_sum_T[8]));
+```
+
+### 13.4.5 A needle in 2^32: what formal buys over simulation
+
+The adder's counterexamples are dense — roughly half of all input pairs overflow
+— so a random test would find them too. The case that shows what formal is
+*for* is a bug with one triggering input. `Saturate` is meant to hold at the
+largest 32-bit value instead of wrapping, and its bound is off by one:
+
+`src/main/scala/Saturate.scala`
+```scala
+// An incrementer meant to SATURATE at the largest 32-bit value instead of
+// wrapping around to zero. The bound is off by one - it holds at 0xfffffffe
+// instead of 0xffffffff - so exactly one input out of 2^32 makes the output
+// wrap, and the assertion catches it. That is a bug simulation is very
+// unlikely to stumble on and formal verification finds at once (§13.4).
+class Saturate extends Module {
+  val io = IO(new Bundle {
+    val in = Input(UInt(32.W))
+    val out = Output(UInt(32.W))
+  })
+
+  io.out := Mux(io.in === "hffff_fffe".U, io.in, io.in + 1.U)
+
+  assert(io.out >= io.in, "a saturating increment must never wrap")
+}
+
+// The same circuit with the bound corrected, which the same bounded check
+// then proves for every input.
+class SaturateFixed extends Module {
+  val io = IO(new Bundle {
+    val in = Input(UInt(32.W))
+    val out = Output(UInt(32.W))
+  })
+
+  io.out := Mux(io.in === "hffff_ffff".U, io.in, io.in + 1.U)
+
+  assert(io.out >= io.in, "a saturating increment must never wrap")
+}
+```
+
+Exactly one input in 2^32 — `0xffffffff` — makes the output wrap to zero. The
+solver finds it at bound 1, and `WriteVcdAnnotation` writes the trace that names
+it:
+
+`src/test/scala/FormalTest.scala`
+```scala
+  // The needle-in-a-haystack case: one failing input out of 2^32.
+  // WriteVcdAnnotation dumps the counterexample trace that names it.
+  "Saturate" should "be refuted, with a counterexample trace" taggedAs (NeedsSolver) in {
+    intercept[FailedBoundedCheckException] {
+      verify(new Saturate(), Seq(BoundedCheck(1), WriteVcdAnnotation))
+    }
+  }
+
+  "SaturateFixed" should "pass, for all 2^32 inputs" taggedAs (NeedsSolver) in {
+    verify(new SaturateFixed(), Seq(BoundedCheck(1)))
+  }
+```
+
+```
+$ sbt "testOnly FormalTest"
+$ cat test_run_dir/Saturate_should_be_refuted_with_a_counterexample_trace/Saturate.bmc.vcd
+```
+
+```
+$scope module Saturate $end
+ $var wire 64 ! Step $end
+ $var wire 1 " reset $end
+ $var wire 32 # io_in $end
+ ...
+ $var wire 1 - assert $end
+$upscope $end
+$enddefinitions $end
+#0
+b0000000000000000000000000000000000000000000000000000000000000000 !
+1"
+b11111111111111111111111111111111 #
+b00000000000000000000000000000000 (
+0-
+```
+
+`io_in` is all ones, `io_out` (`(`) is all zeros, and `assert` (`-`) is `0` at
+step 0. The solver did not search for that input; it *solved* for it.
+
+Now the other side of the comparison, in ChiselSim. A hundred thousand random
+inputs do not find the bug, and the value formal named fails on the first cycle:
+
+`chiselsim/src/test/scala/SaturateSimTest.scala`
+```scala
+class SaturateSimTest extends AnyFlatSpec with ChiselSim {
+
+  "A random search" should "not find the bug in 100000 tries" in {
+    val rng = new scala.util.Random(42) // fixed seed, so this is deterministic
+    simulate(new Saturate()) { dut =>
+      for (_ <- 0 until 100000) {
+        dut.io.in.poke((rng.nextLong() & 0xffffffffL).U)
+        dut.clock.step()
+      }
+    }
+    // Reaching this line is the result: 100000 random inputs, no violation.
+    // At one failing value in 2^32 the chance of hitting it is about 0.0023%.
+  }
+
+  "The counterexample formal produced" should "fail on the first cycle" in {
+    intercept[Exceptions.AssertionFailed] {
+      simulate(new Saturate()) { dut =>
+        dut.io.in.poke("hffffffff".U) // the input named in Saturate.bmc.vcd
+        dut.clock.step()
+      }
+    }
+  }
+
+  "SaturateFixed" should "survive the same input" in {
+    simulate(new SaturateFixed()) { dut =>
+      dut.io.in.poke("hffffffff".U)
+      dut.clock.step()
+    }
+  }
+```
+
+```
+$ cd chiselsim && sbt "testOnly SaturateSimTest"
+```
+
+```
+[info] SaturateSimTest:
+[info] A random search
+[info] - should not find the bug in 100000 tries
+[info] The counterexample formal produced
+[info] - should fail on the first cycle
+[info] SaturateFixed
+[info] - should survive the same input
+[info] Run completed in 8 seconds, 567 milliseconds.
+[info] Total number of tests run: 3
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 3, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+The DUT is *shared*, not copied — `chiselsim/build.sbt` adds
+`../src/main/scala/Saturate.scala` to its sources — so the solver and the
+simulator provably ran on the same circuit. The two tools are complementary in
+exactly this shape: formal locates the input, simulation reproduces and debugs
+it.
+
+The off-by-one is visible in the generated SystemVerilog too, which is one
+constant apart:
+
+```
+$ sbt "runMain Generate"
+$ diff generated/Saturate.sv generated/SaturateFixed.sv
+```
+
+```diff
+<   wire [31:0] io_out_0 = io_in == 32'hFFFFFFFE ? io_in : io_in + 32'h1;
+>   wire [31:0] io_out_0 = (&io_in) ? io_in : io_in + 32'h1;
+```
+
+(firtool recognizes the *correct* bound as "every bit set" and emits the
+reduction-AND `&io_in`, which is why the fixed line does not simply read
+`32'hFFFFFFFF`.)
+
+### 13.4.6 The bound is a bound: `past` and depth
+
+`past(x)` refers to a previous cycle's value, which is how a property spans
+cycles. `MonotonicCounter` claims its output never decreases — true for 255
+cycles, false on the 256th, when the 8-bit register wraps:
+
+`src/main/scala/FormalProps.scala`
+```scala
+// §13.4: a property that spans cycles, and a bug that only a DEEP check finds.
+// The counter must never decrease, which holds for 255 cycles and then fails
+// when it wraps - so a shallow bounded check passes and a deep one refutes.
+class MonotonicCounter extends Module {
+  val io = IO(new Bundle {
+    val out = Output(UInt(8.W))
+  })
+  val reg = RegInit(0.U(8.W))
+  reg := reg + 1.U
+  io.out := reg
+
+  assert(io.out >= past(io.out), "the counter must never decrease")
+}
+```
+
+Both of these tests pass, and that is the lesson:
+
+`src/test/scala/FormalTest.scala`
+```scala
+  // A bound is a bound. The counter only misbehaves when it wraps at 255, so a
+  // shallow check passes and only a deep one finds the bug.
+  "MonotonicCounter" should "survive a shallow bounded check" taggedAs (NeedsSolver) in {
+    verify(new MonotonicCounter(), Seq(BoundedCheck(10)))
+  }
+
+  it should "be refuted once the bound reaches the wrap" taggedAs (NeedsSolver) in {
+    intercept[FailedBoundedCheckException] {
+      verify(new MonotonicCounter(), Seq(BoundedCheck(300)))
+    }
+  }
+```
+
+`BoundedCheck(10)` proves the property — *for ten cycles* — and reports success
+on a design that is broken. Only once the bound reaches the wrap does the check
+refute it. An unsatisfiable answer is never "this design is correct"; it is
+"no counterexample exists within `k`". Choosing `k` is the engineering, and a
+deeper bound costs time: the 300-cycle check is most of this suite's 16 seconds.
+
+`past` is also the one construct here that is **not hardware**. It is a
+chiseltest FIRRTL transform, so it attaches annotations firtool has never heard
+of, and `MonotonicCounter` cannot be emitted at all:
+
+```
+error: Unhandled annotation: {anno = {target = ...}, class = "chiseltest.simulator.Firrtl2AnnotationWrapper"}
+```
+
+That is why `Generate` emits `Saturate`, `SaturateFixed`, and `AssumeNoOverflow`
+but not `MonotonicCounter`.
+
+### 13.4.7 Where ChiselSim fits — and does not
+
+ChiselSim (§13.2.8) is a **simulator**; it has no formal engine, so none of this
+section ports to it. Three things follow:
+
+- **The properties themselves carry over.** A Chisel `assert` is checked by
+  Treadle, by ChiselSim, and by the solver — one property, three tools. That is
+  the whole reason the book's "same assertions are reused" point matters.
+- **Reproducing a counterexample is ChiselSim's job**, as `SaturateSimTest`
+  above shows. Formal tells you *which* input; a simulator lets you watch what
+  the circuit then does, with a waveform if you ask for one.
+- **`past` is not available.** Chisel 7's chiseltest-compatibility shim ships a
+  formal package, but calling into it fails at compile time with
+  `chiseltest.formal.past is unsupported in this compatibility layer` — so a
+  multi-cycle property has to be rewritten with an explicit `RegNext` if you
+  move to Chisel 7. `chisel3.ltl` (`AssertProperty` and friends) is the modern
+  route for temporal properties, and pairs with
+  `--emit-chisel-asserts-as-sva` — which `runMain GenerateSva` already
+  demonstrates — to hand real SVA to an external formal tool.
+
+Since chiseltest is archived, formal verification through `verify` is frozen at
+Chisel 6 along with the rest of it. It still works, as the output above shows;
+it just will not follow you to Chisel 7.
 
 ---
 
@@ -929,15 +1710,40 @@ the same way as a regular simulation waveform.
 $ sbt test
 ```
 
-Expected tail (3 tests across 3 suites — `AssertTest`, `BoringTest`, `TagTest`):
+Expected tail. Four suites are discovered but only three tests run: `FormalTest`
+is entirely tagged `NeedsSolver`, which this task excludes (§13.4.2), so a plain
+`sbt test` needs no native tools at all.
 
 ```
-[info] Run completed in 1 second, 29 milliseconds.
+[info] Run completed in 798 milliseconds.
 [info] Total number of tests run: 3
-[info] Suites: completed 3, aborted 0
+[info] Suites: completed 4, aborted 0
 [info] Tests: succeeded 3, failed 0, canceled 0, ignored 0, pending 0
 [info] All tests passed.
 ```
+
+With a solver installed, add the formal checks:
+
+```
+$ sbt "testOnly FormalTest"
+```
+
+§13.2.8's ChiselSim tests are a **separate project** on Chisel 7, so the command
+above does not include them. Run them from their own folder:
+
+```
+$ cd chiselsim && sbt test
+```
+
+```
+[info] Run completed in 8 seconds, 199 milliseconds.
+[info] Total number of tests run: 7
+[info] Suites: completed 4, aborted 0
+[info] Tests: succeeded 7, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+```
+
+Those four suites need a working **Verilator**; the chapter's own three do not.
 
 The listings this chapter borrows from other chapters run in *their* projects:
 
@@ -953,8 +1759,10 @@ Generate SystemVerilog (a provable `assert` is dropped in generation):
 $ sbt "runMain Generate"
 ```
 
-emits `Assert.sv`, `AssertOverflow.sv`, and `TickGenTestTop.sv` into
-`generated/`. `src/main/scala/Generate.scala` also carries a second entry point,
+emits `Assert.sv`, `AssertOverflow.sv`, `TickGenTestTop.sv`, `Saturate.sv`,
+`SaturateFixed.sv`, and `AssumeNoOverflow.sv` into `generated/`.
+`MonotonicCounter` is deliberately absent — `past` is not hardware, as §13.4.6
+explains. `src/main/scala/Generate.scala` also carries a second entry point,
 `GenerateSva`, which prints `AssertOverflow` re-emitted with
 `--emit-chisel-asserts-as-sva` — the concurrent-SVA form formal tools consume
 rather than the `$error`/`$fatal` pair:
@@ -977,8 +1785,13 @@ $ sbt "runMain GenerateSva"
 - Use **fork/join** for parallel test threads; switch **backends** (Treadle →
   Verilator/VCS) for speed or features.
 - **`assert`** checks assumptions in simulation; **formal verification**
-  (`verify` + Z3) proves them for all inputs and catches corner cases like
-  overflow.
+  (`verify` + Z3) proves them for all inputs *up to a bound* and catches corner
+  cases like overflow. `assume` constrains the environment, `past` spans cycles,
+  and an unsatisfiable answer means "no counterexample within `k`" — not
+  "correct" (§13.4.6). Formal finds the input; a simulator reproduces it.
+- ChiselTest is **archived**; its successor is **ChiselSim** on Chisel 7. §13.2.8
+  runs this chapter's tests in both styles: the port is a three-line diff per
+  test, tags and `expect` messages survive, `fork`/`join` and Treadle do not.
 
 ## 13.7 Exercise
 

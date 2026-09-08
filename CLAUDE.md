@@ -80,6 +80,19 @@ chapter project, **strip those marker comments** for readability.
 Each chapter's `build.sbt` uses the CIRCT plugin form:
 `addCompilerPlugin("org.chipsalliance" % "chisel-plugin" % chiselVersion cross CrossVersion.full)`.
 
+**The one deliberate exception:
+`ch13-debugging-testing-verification/chiselsim/`** — a nested project on
+**Chisel 7.15.0 / Scala 2.13.18**, with no chiseltest dependency, backing
+§13.2.8. It exists because ChiselSim
+(`chisel3.simulator.scalatest.ChiselSim`) is a Chisel 7 API that cannot compile
+against the pinned Chisel 6.5.0, and because chiseltest is archived (read-only
+since 2024-08-19; 6.0.0 is its last release) so the successor API has to be
+shown somewhere runnable. Scala 2.13.18 is forced, not chosen: Chisel 7 pulls
+scala-library 2.13.18 and sbt's SIP-51 check rejects anything older. Do **not**
+"fix" this to match the pinned versions, and do not migrate the chapters to it —
+ChiselSim has no FIRRTL interpreter, so it needs Verilator where Treadle needs
+only a JVM. Its output goes to `build/` (gitignored).
+
 ## Commands (run from inside a chapter folder)
 
 ```
